@@ -316,6 +316,7 @@ model ContentItem {
   corrections     Correction[]
   updateTasks     UpdateTask[]
   analytics       AnalyticsSnapshot[]
+  experiments     PackagingExperiment[]
   generations     AIGeneration[]
   statusHistory   ContentStatusHistory[]
   relationsFrom   ContentRelation[]      @relation("from")
@@ -696,6 +697,24 @@ model AnalyticsSnapshot {
   revenueJson           Json?
   importedBy            String
   createdAt             DateTime @default(now())
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+}
+
+// ---------- Packaging experiments (A/B title tests) ----------
+
+model PackagingExperiment {
+  id         String    @id @default(cuid())
+  contentId  String
+  hypothesis String
+  variantAId String
+  variantBId String
+  startAt    DateTime  @default(now())
+  endAt      DateTime?
+  result     String? // SUPPORTED | CONTRADICTED | INCONCLUSIVE
+  conclusion String?
+  createdBy  String
+  createdAt  DateTime  @default(now())
 
   content ContentItem @relation(fields: [contentId], references: [id])
 }

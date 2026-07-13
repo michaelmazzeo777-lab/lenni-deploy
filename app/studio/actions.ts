@@ -14,6 +14,7 @@ import { grantApproval } from "@/domain/approval";
 import { generateContentPacket, reviewGeneration } from "@/domain/aiContent";
 import { publishPublicArticle } from "@/domain/publication";
 import { createCorrection } from "@/domain/correction";
+import { createPackagingExperiment, concludePackagingExperiment } from "@/domain/experiments";
 import type {
   ContentStatus,
   ApprovalScope,
@@ -345,6 +346,43 @@ export async function createCorrectionAction(fd: FormData) {
     });
     revalidatePath(`/studio/content/${id}`);
     revalidatePath("/", "layout");
+  } catch (e) {
+    to = `${to}&error=${encodeURIComponent(errMsg(e))}`;
+  }
+  redirect(to);
+}
+
+// ---- Packaging experiments ----
+
+export async function createExperimentAction(fd: FormData) {
+  const actor = await requireActor();
+  const id = s(fd, "contentId");
+  let to = `/studio/content/${id}?tab=packaging`;
+  try {
+    await createPackagingExperiment(actor, {
+      contentId: id,
+      hypothesis: s(fd, "hypothesis"),
+      variantAId: s(fd, "variantAId"),
+      variantBId: s(fd, "variantBId"),
+    });
+    revalidatePath(`/studio/content/${id}`);
+  } catch (e) {
+    to = `${to}&error=${encodeURIComponent(errMsg(e))}`;
+  }
+  redirect(to);
+}
+
+export async function concludeExperimentAction(fd: FormData) {
+  const actor = await requireActor();
+  const id = s(fd, "contentId");
+  let to = `/studio/content/${id}?tab=packaging`;
+  try {
+    await concludePackagingExperiment(actor, {
+      experimentId: s(fd, "experimentId"),
+      result: s(fd, "result") as never,
+      conclusion: s(fd, "conclusion"),
+    });
+    revalidatePath(`/studio/content/${id}`);
   } catch (e) {
     to = `${to}&error=${encodeURIComponent(errMsg(e))}`;
   }

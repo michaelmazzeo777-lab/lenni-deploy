@@ -17,6 +17,8 @@ import {
   reviewAssetAction,
   createTitleAction,
   createThumbnailAction,
+  createExperimentAction,
+  concludeExperimentAction,
   generateAction,
   reviewGenerationAction,
   grantApprovalAction,
@@ -447,91 +449,201 @@ async function Assets({ actor, contentId }: { actor: Actor; contentId: string })
 
 // ---------- Packaging ----------
 async function Packaging({ actor, contentId }: { actor: Actor; contentId: string }) {
-  const [titles, thumbs] = await Promise.all([
+  const [titles, thumbs, experiments] = await Promise.all([
     prisma.titleVariant.findMany({ where: { contentId } }),
     prisma.thumbnailVariant.findMany({ where: { contentId } }),
+    prisma.packagingExperiment.findMany({ where: { contentId }, orderBy: { startAt: "desc" } }),
   ]);
   const mayCreate = can(actor, "packaging.create");
+  const mayConclude = can(actor, "packaging.approve");
+  const titleById = new Map(titles.map((t) => [t.id, t.text]));
   return (
-    <div className="row" style={{ alignItems: "flex-start" }}>
-      <div className="card" style={{ flex: "1 1 360px" }}>
-        <h2>Title variants ({titles.length})</h2>
-        <ul>
-          {titles.map((t) => (
-            <li key={t.id}>
-              {t.text} <span className="muted">({t.strategy})</span>
-            </li>
-          ))}
-          {titles.length === 0 ? <li className="muted">None</li> : null}
-        </ul>
-        {mayCreate ? (
-          <form action={createTitleAction} style={{ marginTop: 12 }}>
-            <input type="hidden" name="contentId" value={contentId} />
-            <label htmlFor="text">Title text</label>
-            <input id="text" name="text" required />
-            <label htmlFor="strategy">Strategy</label>
-            <select id="strategy" name="strategy" defaultValue="SEARCH_FIRST">
-              <option value="SEARCH_FIRST">Search-first</option>
-              <option value="BROWSE_FIRST">Browse-first</option>
-            </select>
-            <label style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <input
-                type="checkbox"
-                name="deceptionCheck"
-                style={{ width: "auto" }}
-                defaultChecked
-              />{" "}
-              Not deceptive / matches evidence
-            </label>
-            <div style={{ marginTop: 12 }}>
-              <button type="submit">Add title</button>
-            </div>
-          </form>
-        ) : null}
+    <div>
+      <div className="row" style={{ alignItems: "flex-start" }}>
+        <div className="card" style={{ flex: "1 1 360px" }}>
+          <h2>Title variants ({titles.length})</h2>
+          <ul>
+            {titles.map((t) => (
+              <li key={t.id}>
+                {t.text} <span className="muted">({t.strategy})</span>
+              </li>
+            ))}
+            {titles.length === 0 ? <li className="muted">None</li> : null}
+          </ul>
+          {mayCreate ? (
+            <form action={createTitleAction} style={{ marginTop: 12 }}>
+              <input type="hidden" name="contentId" value={contentId} />
+              <label htmlFor="text">Title text</label>
+              <input id="text" name="text" required />
+              <label htmlFor="strategy">Strategy</label>
+              <select id="strategy" name="strategy" defaultValue="SEARCH_FIRST">
+                <option value="SEARCH_FIRST">Search-first</option>
+                <option value="BROWSE_FIRST">Browse-first</option>
+              </select>
+              <label style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input
+                  type="checkbox"
+                  name="deceptionCheck"
+                  style={{ width: "auto" }}
+                  defaultChecked
+                />{" "}
+                Not deceptive / matches evidence
+              </label>
+              <div style={{ marginTop: 12 }}>
+                <button type="submit">Add title</button>
+              </div>
+            </form>
+          ) : null}
+        </div>
+        <div className="card" style={{ flex: "1 1 360px" }}>
+          <h2>Thumbnail briefs ({thumbs.length})</h2>
+          <ul>
+            {thumbs.map((t) => (
+              <li key={t.id}>
+                <strong>{t.name}</strong>: {t.brief}
+              </li>
+            ))}
+            {thumbs.length === 0 ? <li className="muted">None</li> : null}
+          </ul>
+          {mayCreate ? (
+            <form action={createThumbnailAction} style={{ marginTop: 12 }}>
+              <input type="hidden" name="contentId" value={contentId} />
+              <label htmlFor="tname">Name</label>
+              <input id="tname" name="name" required />
+              <label htmlFor="brief">Brief (original art only, no Rockstar marks)</label>
+              <textarea id="brief" name="brief" required />
+              <label style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  name="mobileCheck"
+                  style={{ width: "auto" }}
+                  defaultChecked
+                />{" "}
+                Mobile legible
+              </label>
+              <label style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  name="trademarkCheck"
+                  style={{ width: "auto" }}
+                  defaultChecked
+                />{" "}
+                No trademarked marks
+              </label>
+              <label style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  name="deceptionCheck"
+                  style={{ width: "auto" }}
+                  defaultChecked
+                />{" "}
+                Not deceptive
+              </label>
+              <div style={{ marginTop: 12 }}>
+                <button type="submit">Add thumbnail brief</button>
+              </div>
+            </form>
+          ) : null}
+        </div>
       </div>
-      <div className="card" style={{ flex: "1 1 360px" }}>
-        <h2>Thumbnail briefs ({thumbs.length})</h2>
-        <ul>
-          {thumbs.map((t) => (
-            <li key={t.id}>
-              <strong>{t.name}</strong>: {t.brief}
-            </li>
-          ))}
-          {thumbs.length === 0 ? <li className="muted">None</li> : null}
-        </ul>
-        {mayCreate ? (
-          <form action={createThumbnailAction} style={{ marginTop: 12 }}>
+
+      <div className="card">
+        <h2>Title A/B experiments ({experiments.length})</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Hypothesis</th>
+              <th>Variant A</th>
+              <th>Variant B</th>
+              <th>Result</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {experiments.map((ex) => (
+              <tr key={ex.id}>
+                <td>{ex.hypothesis}</td>
+                <td className="muted">{titleById.get(ex.variantAId) ?? ex.variantAId}</td>
+                <td className="muted">{titleById.get(ex.variantBId) ?? ex.variantBId}</td>
+                <td>
+                  {ex.result ? (
+                    <>
+                      <strong>{ex.result}</strong>
+                      {ex.conclusion ? (
+                        <div className="muted" style={{ fontSize: "0.78rem" }}>
+                          {ex.conclusion}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="muted">running</span>
+                  )}
+                </td>
+                <td>
+                  {mayConclude && !ex.result ? (
+                    <form action={concludeExperimentAction} className="row" style={{ gap: 6 }}>
+                      <input type="hidden" name="contentId" value={contentId} />
+                      <input type="hidden" name="experimentId" value={ex.id} />
+                      <select name="result" defaultValue="SUPPORTED" style={{ width: 130 }}>
+                        <option value="SUPPORTED">Supported</option>
+                        <option value="CONTRADICTED">Contradicted</option>
+                        <option value="INCONCLUSIVE">Inconclusive</option>
+                      </select>
+                      <input
+                        name="conclusion"
+                        placeholder="Interpretation"
+                        style={{ width: 160 }}
+                      />
+                      <button type="submit" className="secondary">
+                        Conclude
+                      </button>
+                    </form>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+            {experiments.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="muted">
+                  No experiments yet.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+        {mayCreate && titles.length >= 2 ? (
+          <form action={createExperimentAction} className="row" style={{ gap: 8, marginTop: 12 }}>
             <input type="hidden" name="contentId" value={contentId} />
-            <label htmlFor="tname">Name</label>
-            <input id="tname" name="name" required />
-            <label htmlFor="brief">Brief (original art only, no Rockstar marks)</label>
-            <textarea id="brief" name="brief" required />
-            <label style={{ display: "flex", gap: 8 }}>
-              <input type="checkbox" name="mobileCheck" style={{ width: "auto" }} defaultChecked />{" "}
-              Mobile legible
-            </label>
-            <label style={{ display: "flex", gap: 8 }}>
-              <input
-                type="checkbox"
-                name="trademarkCheck"
-                style={{ width: "auto" }}
-                defaultChecked
-              />{" "}
-              No trademarked marks
-            </label>
-            <label style={{ display: "flex", gap: 8 }}>
-              <input
-                type="checkbox"
-                name="deceptionCheck"
-                style={{ width: "auto" }}
-                defaultChecked
-              />{" "}
-              Not deceptive
-            </label>
-            <div style={{ marginTop: 12 }}>
-              <button type="submit">Add thumbnail brief</button>
+            <div style={{ flex: "2 1 240px" }}>
+              <label htmlFor="hypothesis">Hypothesis</label>
+              <input id="hypothesis" name="hypothesis" required />
+            </div>
+            <div style={{ flex: "1 1 160px" }}>
+              <label htmlFor="variantAId">Variant A</label>
+              <select id="variantAId" name="variantAId">
+                {titles.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.text.slice(0, 40)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ flex: "1 1 160px" }}>
+              <label htmlFor="variantBId">Variant B</label>
+              <select id="variantBId" name="variantBId" defaultValue={titles[1]?.id}>
+                {titles.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.text.slice(0, 40)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ alignSelf: "flex-end" }}>
+              <button type="submit">Start experiment</button>
             </div>
           </form>
+        ) : mayCreate ? (
+          <p className="muted">Add at least two title variants to start an A/B experiment.</p>
         ) : null}
       </div>
     </div>

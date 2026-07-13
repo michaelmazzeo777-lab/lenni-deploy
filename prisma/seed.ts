@@ -7,6 +7,7 @@ import { createContent } from "@/domain/content";
 import { saveScriptVersion } from "@/domain/script";
 import { createAsset, reviewAsset } from "@/domain/rights";
 import { createTitleVariant, createThumbnailVariant } from "@/domain/packaging";
+import { createPackagingExperiment, concludePackagingExperiment } from "@/domain/experiments";
 import { grantApproval } from "@/domain/approval";
 import { publishPublicArticle } from "@/domain/publication";
 import { createCorrection } from "@/domain/correction";
@@ -203,6 +204,21 @@ async function main() {
     }
   }
 
+  // Give pilots due dates so the calendar shows overdue / this-week / later.
+  const daysFromNow = (n: number) => new Date(Date.now() + n * 24 * 60 * 60 * 1000);
+  await prisma.contentItem.update({
+    where: { id: pilots[0]!.id },
+    data: { dueAt: daysFromNow(20) },
+  });
+  await prisma.contentItem.update({
+    where: { id: pilots[1]!.id },
+    data: { dueAt: daysFromNow(-3) },
+  });
+  await prisma.contentItem.update({
+    where: { id: pilots[2]!.id },
+    data: { dueAt: daysFromNow(4) },
+  });
+
   // ---- Drive pilot #1 all the way to a PUBLISHED public guide ----
   const flagship = pilots[0]!;
   await linkClaimToContent(editor, flagship.id, confirmed.id, true);
@@ -228,12 +244,32 @@ async function main() {
   });
   await reviewAsset(owner, { assetId: asset.id, riskLevel: "LOW", decision: "APPROVED" });
 
-  await createTitleVariant(editor, {
+  const titleA = await createTitleVariant(editor, {
     contentId: flagship.id,
     text: "Everything Officially Confirmed About GTA VI (Evidence Only)",
     strategy: "SEARCH_FIRST",
     deceptionCheck: true,
   });
+  const titleB = await createTitleVariant(editor, {
+    contentId: flagship.id,
+    text: "GTA VI: What's Actually Confirmed vs Everything Else",
+    strategy: "BROWSE_FIRST",
+    deceptionCheck: true,
+  });
+
+  // A concluded A/B title experiment (measured result separated from interpretation).
+  const experiment = await createPackagingExperiment(editor, {
+    contentId: flagship.id,
+    hypothesis: "A browse-first framing raises CTR without overpromising.",
+    variantAId: titleA.id,
+    variantBId: titleB.id,
+  });
+  await concludePackagingExperiment(owner, {
+    experimentId: experiment.id,
+    result: "INCONCLUSIVE",
+    conclusion: "Sample too small over the first 48h; re-run at launch with more impressions.",
+  });
+
   await createThumbnailVariant(editor, {
     contentId: flagship.id,
     name: "Evidence board",
