@@ -1,0 +1,723 @@
+// Field Guide Studio — data model
+// See docs/04_DATA_MODEL.md. Critical invariants are enforced by DB constraints
+// and triggers added in the migration SQL (see prisma/migrations).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum Role {
+  OWNER
+  EDITOR
+  RESEARCHER
+  WRITER
+  PRODUCER
+  RIGHTS_REVIEWER
+  ANALYST
+  READ_ONLY
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum ContentType {
+  LONG_VIDEO
+  SHORT
+  WEBSITE_GUIDE
+  NEWS_BRIEFING
+  EVIDENCE_ANALYSIS
+  EXPERIMENT
+  DOCUMENTARY
+  COMMUNITY_POST
+  NEWSLETTER_ISSUE
+}
+
+enum Pillar {
+  BRIEFING
+  EVIDENCE_BOARD
+  FIELD_MANUAL
+  FIELD_LAB
+  LEONIDA_STORIES
+}
+
+enum ContentStatus {
+  IDEA
+  TRIAGE
+  RESEARCH
+  EVIDENCE_READY
+  OUTLINE
+  SCRIPT_DRAFT
+  SCRIPT_REVIEW
+  PRODUCTION
+  EDIT_REVIEW
+  PACKAGING
+  RIGHTS_REVIEW
+  APPROVAL
+  READY
+  PUBLISHED
+  UPDATE_DUE
+  ARCHIVED
+}
+
+enum SpoilerLevel {
+  NONE
+  PREMISE_ONLY
+  EARLY_GAME
+  MIDGAME
+  MAJOR_STORY
+  ENDING
+}
+
+enum SourceClass {
+  OFFICIAL_SOURCE
+  WEB_CORROBORATED
+  USER_PROVIDED
+  UNVERIFIED
+  STALE_RISK
+  CONFLICT
+}
+
+enum SourceStatus {
+  ACTIVE
+  STALE
+  RETIRED
+}
+
+enum ClaimClassification {
+  CONFIRMED
+  OBSERVED
+  ANALYSIS
+  PREDICTION
+  RUMOR
+  UNVERIFIED
+  LEAKED
+}
+
+enum ClaimStatus {
+  PROPOSED
+  REVIEWED
+  QUARANTINED
+  RETIRED
+}
+
+enum AssetOwnership {
+  ORIGINAL
+  THIRD_PARTY
+}
+
+enum AssetStatus {
+  PENDING
+  REVIEWED
+  BLOCKED
+}
+
+enum RightsRisk {
+  LOW
+  MEDIUM
+  HIGH
+  BLOCKED
+}
+
+enum RightsDecision {
+  APPROVED
+  NEEDS_WORK
+  BLOCKED
+}
+
+enum VariantStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+}
+
+enum ApprovalScope {
+  EDITORIAL_FACTS
+  SCRIPT
+  RIGHTS
+  PACKAGING
+  PUBLIC_WEBSITE
+  YOUTUBE
+  SPONSOR
+  AFFILIATE
+  NEWSLETTER
+  MERCHANDISE
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+}
+
+enum PublicationChannel {
+  PUBLIC_WEBSITE
+  YOUTUBE
+  NEWSLETTER
+}
+
+enum PublicationStatus {
+  DRAFT
+  PUBLISHED
+  UNPUBLISHED
+}
+
+enum CorrectionSeverity {
+  MINOR
+  MODERATE
+  MAJOR
+}
+
+enum CorrectionStatus {
+  REPORTED
+  IN_REVIEW
+  RESOLVED
+}
+
+enum UpdateTaskStatus {
+  OPEN
+  DONE
+}
+
+enum AITaskType {
+  RESEARCH_PLAN
+  SOURCE_SUMMARY
+  CLAIM_EXTRACTION
+  CONTENT_PACKET
+  SHORTS
+  WEBSITE_GUIDE
+  PACKAGING
+  ANALYTICS
+  CORRECTION_SUGGESTION
+}
+
+enum AIValidationStatus {
+  VALID
+  QUARANTINED
+  FAILED
+}
+
+enum AIReviewDecision {
+  ACCEPT
+  ACCEPT_WITH_EDITS
+  REJECT
+  QUARANTINE
+  NEEDS_SOURCE_WORK
+  NEEDS_RIGHTS_REVIEW
+}
+
+// ---------- Identity ----------
+
+model Workspace {
+  id         String   @id @default(cuid())
+  name       String
+  slug       String   @unique
+  status     String   @default("ACTIVE")
+  disclaimer String
+  timezone   String   @default("America/New_York")
+  createdAt  DateTime @default(now())
+
+  users        User[]
+  roles        RoleAssignment[]
+  contentItems ContentItem[]
+  sources      Source[]
+  claims       Claim[]
+  generations  AIGeneration[]
+  auditEvents  AuditEvent[]
+}
+
+model User {
+  id          String     @id @default(cuid())
+  workspaceId String
+  displayName String
+  email       String     @unique
+  passwordHash String
+  status      UserStatus @default(ACTIVE)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id])
+  roles     RoleAssignment[]
+  sessions  Session[]
+}
+
+model RoleAssignment {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        Role
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id])
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@unique([userId, workspaceId, role])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// ---------- Content ----------
+
+model ContentItem {
+  id             String        @id @default(cuid())
+  workspaceId    String
+  type           ContentType
+  pillar         Pillar
+  workingTitle   String
+  publicTitle    String?
+  slug           String?
+  status         ContentStatus @default(IDEA)
+  priority       Int           @default(3)
+  urgency        Int           @default(3)
+  difficulty     Int           @default(3)
+  searchValue    Int           @default(3)
+  longTermValue  Int           @default(3)
+  audienceIntent String?
+  viewerPromise  String?
+  searchQuery    String?
+  browsePromise  String?
+  spoilerLevel   SpoilerLevel  @default(NONE)
+  platformScope  String?
+  targetLength   String?
+  ownerId        String?
+  dueAt          DateTime?
+  notBeforeAt    DateTime?
+  updateTrigger  String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+
+  workspace       Workspace              @relation(fields: [workspaceId], references: [id])
+  claims          ContentClaim[]
+  briefs          ContentBrief[]
+  scripts         ScriptVersion[]
+  assets          Asset[]
+  titleVariants   TitleVariant[]
+  thumbnails      ThumbnailVariant[]
+  approvals       Approval[]
+  publications    Publication[]
+  articleRevisions PublicArticleRevision[]
+  corrections     Correction[]
+  updateTasks     UpdateTask[]
+  analytics       AnalyticsSnapshot[]
+  generations     AIGeneration[]
+  statusHistory   ContentStatusHistory[]
+  relationsFrom   ContentRelation[]      @relation("from")
+  relationsTo     ContentRelation[]      @relation("to")
+
+  @@unique([workspaceId, slug])
+}
+
+model ContentRelation {
+  id            String @id @default(cuid())
+  fromContentId String
+  toContentId   String
+  relationType  String
+
+  from ContentItem @relation("from", fields: [fromContentId], references: [id])
+  to   ContentItem @relation("to", fields: [toContentId], references: [id])
+
+  @@unique([fromContentId, toContentId, relationType])
+}
+
+model ContentStatusHistory {
+  id        String        @id @default(cuid())
+  contentId String
+  fromStatus ContentStatus?
+  toStatus  ContentStatus
+  actorId   String
+  reason    String?
+  createdAt DateTime      @default(now())
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+}
+
+// ---------- Research ----------
+
+model Source {
+  id               String       @id @default(cuid())
+  workspaceId      String
+  title            String
+  publisher        String
+  url              String?
+  sourceClass      SourceClass
+  sourceType       String
+  publicationDate  DateTime?
+  retrievalDate    DateTime?
+  factualAsOfDate  DateTime?
+  inspectedLocation String?
+  supportNotes     String?
+  archiveReference String?
+  status           SourceStatus @default(ACTIVE)
+  staleAfter       DateTime?
+  createdBy        String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id])
+  claimLinks ClaimSource[]
+}
+
+model Claim {
+  id                 String              @id @default(cuid())
+  workspaceId        String
+  statement          String
+  classification     ClaimClassification
+  confidence         Int                 @default(3)
+  status             ClaimStatus         @default(PROPOSED)
+  publicWording      String?
+  contradictionGroupId String?
+  lastReviewedAt     DateTime?
+  createdBy          String
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id])
+  sources   ClaimSource[]
+  contentLinks ContentClaim[]
+}
+
+model ClaimSource {
+  id          String   @id @default(cuid())
+  claimId     String
+  sourceId    String
+  supportType String
+  supportText String?
+  exactLocation String?
+  reviewedBy  String?
+  reviewedAt  DateTime?
+
+  claim  Claim  @relation(fields: [claimId], references: [id])
+  source Source @relation(fields: [sourceId], references: [id])
+
+  @@unique([claimId, sourceId])
+}
+
+model ContentClaim {
+  id        String  @id @default(cuid())
+  contentId String
+  claimId   String
+  usage     String  @default("SUPPORTING")
+  required  Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+  claim   Claim       @relation(fields: [claimId], references: [id])
+
+  @@unique([contentId, claimId])
+}
+
+// ---------- Editorial ----------
+
+model ContentBrief {
+  id                   String   @id @default(cuid())
+  contentId            String
+  version              Int      @default(1)
+  objective            String
+  audience             String?
+  angle                String?
+  allowedClaimIds      String[]
+  prohibitedAssertions String[]
+  structure            String?
+  callToAction         String?
+  visualPlan           String?
+  rightsNotes          String?
+  successMetric        String?
+  createdBy            String
+  createdAt            DateTime @default(now())
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+
+  @@unique([contentId, version])
+}
+
+model ScriptVersion {
+  id                String   @id @default(cuid())
+  contentId         String
+  version           Int
+  body              String
+  structuredBodyJson Json?
+  wordCount         Int      @default(0)
+  estimatedDuration Int      @default(0)
+  authorType        String   @default("HUMAN")
+  createdBy         String
+  generationId      String?
+  createdAt         DateTime @default(now())
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+
+  @@unique([contentId, version])
+}
+
+// ---------- AI ----------
+
+model PromptTemplate {
+  id         String   @id @default(cuid())
+  key        String
+  version    Int
+  systemText String
+  userTemplate String
+  outputSchema String
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@unique([key, version])
+}
+
+model AIGeneration {
+  id                    String             @id @default(cuid())
+  workspaceId           String
+  contentId             String?
+  taskType              AITaskType
+  provider              String
+  model                 String
+  promptTemplateKey     String
+  promptTemplateVersion Int
+  inputHash             String
+  sourceIds             String[]
+  claimIds              String[]
+  requestJson           Json
+  responseJson          Json?
+  validationStatus      AIValidationStatus
+  quarantineReason      String?
+  tokenUsage            Int?
+  estimatedCost         Float?
+  createdBy             String
+  createdAt             DateTime           @default(now())
+  reviewedBy            String?
+  reviewedAt            DateTime?
+  reviewDecision        AIReviewDecision?
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id])
+  content   ContentItem? @relation(fields: [contentId], references: [id])
+}
+
+// ---------- Assets and rights ----------
+
+model Asset {
+  id            String         @id @default(cuid())
+  contentId     String
+  name          String
+  mediaType     String
+  location      String?
+  ownership     AssetOwnership @default(ORIGINAL)
+  ownerName     String?
+  sourceUrl     String?
+  intendedUse   String?
+  licenseBasis  String?
+  amountUsed    String?
+  transformation String?
+  containsMusic Boolean        @default(false)
+  spoilerLevel  SpoilerLevel   @default(NONE)
+  // Prohibited-use flags (any true blocks approval):
+  flagLeaked        Boolean @default(false)
+  flagFakeTrailer   Boolean @default(false)
+  flagIsolatedCutscene Boolean @default(false)
+  flagUnlicensedMusic  Boolean @default(false)
+  flagMassProducedAI   Boolean @default(false)
+  flagDeceptive        Boolean @default(false)
+  status        AssetStatus    @default(PENDING)
+  createdBy     String
+  createdAt     DateTime       @default(now())
+
+  content ContentItem   @relation(fields: [contentId], references: [id])
+  reviews RightsReview[]
+}
+
+model RightsReview {
+  id         String         @id @default(cuid())
+  assetId    String
+  riskLevel  RightsRisk
+  decision   RightsDecision
+  notes      String?
+  reviewerId String
+  reviewedAt DateTime       @default(now())
+  expiresAt  DateTime?
+
+  asset Asset @relation(fields: [assetId], references: [id])
+}
+
+// ---------- Packaging ----------
+
+model TitleVariant {
+  id                  String        @id @default(cuid())
+  contentId           String
+  text                String
+  strategy            String        @default("SEARCH_FIRST")
+  classificationBadge String?
+  deceptionCheck      Boolean       @default(false)
+  status              VariantStatus @default(DRAFT)
+  createdBy           String
+  createdAt           DateTime      @default(now())
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+}
+
+model ThumbnailVariant {
+  id             String        @id @default(cuid())
+  contentId      String
+  name           String
+  brief          String
+  imageLocation  String?
+  strategy       String        @default("BROWSE_FIRST")
+  mobileCheck    Boolean       @default(false)
+  deceptionCheck Boolean       @default(false)
+  trademarkCheck Boolean       @default(false)
+  status         VariantStatus @default(DRAFT)
+  createdBy      String
+  createdAt      DateTime      @default(now())
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+}
+
+// ---------- Approval and publication ----------
+
+model Approval {
+  id                  String           @id @default(cuid())
+  contentId           String
+  scope               ApprovalScope
+  decision            ApprovalDecision
+  notes               String?
+  actorId             String
+  contentRevisionHash String
+  createdAt           DateTime         @default(now())
+  revokedAt           DateTime?
+  revokedBy           String?
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+}
+
+model Publication {
+  id          String            @id @default(cuid())
+  contentId   String
+  channel     PublicationChannel
+  status      PublicationStatus @default(DRAFT)
+  publicUrl   String?
+  externalId  String?
+  scheduledAt DateTime?
+  publishedAt DateTime?
+  recordedBy  String
+  createdAt   DateTime          @default(now())
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+
+  @@unique([contentId, channel])
+}
+
+model PublicArticleRevision {
+  id            String       @id @default(cuid())
+  contentId     String
+  revision      Int
+  title         String
+  slug          String
+  summary       String
+  body          String
+  sourceSnapshot Json
+  claimSnapshot Json
+  disclaimer    String
+  spoilerLevel  SpoilerLevel
+  pillar        Pillar
+  lastVerifiedAt DateTime
+  approvedBy    String
+  approvedAt    DateTime
+  publishedAt   DateTime     @default(now())
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+
+  @@unique([contentId, revision])
+  @@unique([slug, revision])
+}
+
+// ---------- Corrections and updates ----------
+
+model Correction {
+  id           String             @id @default(cuid())
+  contentId    String
+  severity     CorrectionSeverity
+  originalText String
+  correctedText String
+  reason       String
+  sourceId     String?
+  publicNotice String
+  status       CorrectionStatus   @default(REPORTED)
+  createdBy    String
+  resolvedBy   String?
+  createdAt    DateTime           @default(now())
+  resolvedAt   DateTime?
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+}
+
+model UpdateTask {
+  id              String           @id @default(cuid())
+  contentId       String
+  triggerType     String
+  triggerReference String?
+  dueAt           DateTime?
+  status          UpdateTaskStatus @default(OPEN)
+  ownerId         String?
+  createdAt       DateTime         @default(now())
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+}
+
+// ---------- Analytics ----------
+
+model AnalyticsSnapshot {
+  id                    String   @id @default(cuid())
+  contentId             String
+  platform              String
+  snapshotAt            DateTime
+  impressions           Int?
+  views                 Int?
+  ctr                   Float?
+  firstThirtySecondRetention Float?
+  averagePercentageViewed    Float?
+  watchHours            Float?
+  subscribersGained     Int?
+  shortsToLongClicks    Int?
+  trafficSourcesJson    Json?
+  revenueJson           Json?
+  importedBy            String
+  createdAt             DateTime @default(now())
+
+  content ContentItem @relation(fields: [contentId], references: [id])
+}
+
+// ---------- Audit (append-only, enforced by trigger) ----------
+
+model AuditEvent {
+  id          String   @id @default(cuid())
+  workspaceId String
+  actorId     String?
+  actorType   String   @default("USER")
+  action      String
+  entityType  String
+  entityId    String
+  beforeJson  Json?
+  afterJson   Json?
+  metadataJson Json?
+  requestId   String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([workspaceId, createdAt])
+}
