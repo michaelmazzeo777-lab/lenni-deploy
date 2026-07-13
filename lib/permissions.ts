@@ -27,6 +27,14 @@ export type Capability =
   | "role.manage"
   | "ai.generate"
   | "ai.review"
+  | "contributor.manage"
+  | "assignment.submit"
+  | "capture.submit"
+  | "capture.review"
+  | "visual.brief"
+  | "visual.import"
+  | "visual.review"
+  | "handoff.export"
   | "audit.read";
 
 const MATRIX: Record<Capability, Role[]> = {
@@ -50,12 +58,36 @@ const MATRIX: Record<Capability, Role[]> = {
   "role.manage": [Role.OWNER],
   "ai.generate": [Role.OWNER, Role.EDITOR, Role.RESEARCHER, Role.WRITER],
   "ai.review": [Role.OWNER, Role.EDITOR],
+  "contributor.manage": [Role.OWNER, Role.EDITOR],
+  // Contributors act only on their OWN assignments; ownership is enforced in the
+  // domain service (assertAssignmentAccess), not by capability alone.
+  "assignment.submit": [
+    Role.OWNER,
+    Role.EDITOR,
+    Role.PRODUCER,
+    Role.CONTRIBUTOR,
+    Role.NARRATOR,
+    Role.VIDEO_EDITOR,
+    Role.DESIGNER,
+    Role.WRITER,
+    Role.RESEARCHER,
+  ],
+  "capture.submit": [Role.OWNER, Role.PRODUCER, Role.CONTRIBUTOR],
+  "capture.review": [Role.OWNER, Role.EDITOR],
+  "visual.brief": [Role.OWNER, Role.EDITOR, Role.PRODUCER, Role.DESIGNER],
+  "visual.import": [Role.OWNER, Role.EDITOR, Role.PRODUCER, Role.DESIGNER],
+  "visual.review": [Role.OWNER, Role.RIGHTS_REVIEWER],
+  "handoff.export": [Role.OWNER, Role.EDITOR, Role.PRODUCER],
   "audit.read": [
     Role.OWNER,
     Role.EDITOR,
     Role.RESEARCHER,
     Role.WRITER,
     Role.PRODUCER,
+    Role.CONTRIBUTOR,
+    Role.NARRATOR,
+    Role.VIDEO_EDITOR,
+    Role.DESIGNER,
     Role.RIGHTS_REVIEWER,
     Role.ANALYST,
     Role.READ_ONLY,

@@ -19,6 +19,10 @@ enum Role {
   RESEARCHER
   WRITER
   PRODUCER
+  CONTRIBUTOR
+  NARRATOR
+  VIDEO_EDITOR
+  DESIGNER
   RIGHTS_REVIEWER
   ANALYST
   READ_ONLY
@@ -317,6 +321,10 @@ model ContentItem {
   updateTasks     UpdateTask[]
   analytics       AnalyticsSnapshot[]
   experiments     PackagingExperiment[]
+  assignments     Assignment[]
+  shots           Shot[]
+  captureSessions CaptureSession[]
+  visualBriefs    VisualBrief[]
   generations     AIGeneration[]
   statusHistory   ContentStatusHistory[]
   relationsFrom   ContentRelation[]      @relation("from")
@@ -717,6 +725,212 @@ model PackagingExperiment {
   createdAt  DateTime  @default(now())
 
   content ContentItem @relation(fields: [contentId], references: [id])
+}
+
+// ---------- Contributors and assignments ----------
+
+enum AssignmentKind {
+  RESEARCH
+  WRITING
+  GAMEPLAY_CAPTURE
+  EXPERIMENT
+  NARRATION
+  EDITING
+  THUMBNAIL_DESIGN
+  MOTION_GRAPHICS
+  RIGHTS_REVIEW
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  SUBMITTED
+  REVISION_REQUESTED
+  APPROVED
+  REJECTED
+}
+
+enum ReleaseStatus {
+  NOT_REQUIRED
+  PENDING
+  RECEIVED
+}
+
+// Contractor/contributor profile. Never stores payment credentials, bank data,
+// tax identifiers, passwords, or identity documents — names/specialty only.
+model Contributor {
+  id          String  @id @default(cuid())
+  workspaceId String
+  userId      String? @unique
+  displayName String
+  specialty   String?
+  status      String  @default("ACTIVE")
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  assignments Assignment[]
+}
+
+model Assignment {
+  id                  String           @id @default(cuid())
+  contentId           String
+  contributorId       String
+  kind                AssignmentKind
+  status              AssignmentStatus @default(ASSIGNED)
+  dueAt               DateTime?
+  deliverableNotes    String?
+  reviewNotes         String?
+  rightsReleaseStatus ReleaseStatus    @default(PENDING)
+  createdBy           String
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  contributor Contributor      @relation(fields: [contributorId], references: [id])
+  content     ContentItem      @relation(fields: [contentId], references: [id])
+  captures    CaptureSession[]
+}
+
+// ---------- Gameplay production ----------
+
+enum CaptureStatus {
+  SUBMITTED
+  RETAKE_REQUESTED
+  APPROVED
+  REJECTED
+  BLOCKED
+}
+
+model Shot {
+  id           String       @id @default(cuid())
+  contentId    String
+  order        Int
+  title        String
+  description  String?
+  captureNotes String?
+  spoilerLevel SpoilerLevel @default(NONE)
+  createdBy    String
+  createdAt    DateTime     @default(now())
+
+  content  ContentItem      @relation(fields: [contentId], references: [id])
+  captures CaptureSession[]
+
+  @@unique([contentId, order])
+}
+
+model CaptureSession {
+  id                    String        @id @default(cuid())
+  contentId             String
+  assignmentId          String?
+  shotId                String?
+  platform              String
+  gameVersion           String
+  captureDate           DateTime      @default(now())
+  settings              String?
+  testConditions        String?
+  trialCount            Int?
+  hudVisible            Boolean       @default(true)
+  containsLicensedMusic Boolean       @default(false)
+  modsDeclared          Boolean       @default(false)
+  modsNotes             String?
+  spoilerLevel          SpoilerLevel  @default(NONE)
+  fileReference         String?
+  flagLeaked            Boolean       @default(false)
+  status                CaptureStatus @default(SUBMITTED)
+  reviewNotes           String?
+  submittedBy           String
+  reviewedBy            String?
+  supersedesId          String?
+  createdAt             DateTime      @default(now())
+
+  content    ContentItem @relation(fields: [contentId], references: [id])
+  assignment Assignment? @relation(fields: [assignmentId], references: [id])
+  shot       Shot?       @relation(fields: [shotId], references: [id])
+}
+
+// ---------- Visual production ----------
+
+enum VisualKind {
+  THUMBNAIL
+  DIAGRAM
+  TIMELINE
+  EVIDENCE_CARD
+  MAP
+  CHANNEL_GRAPHIC
+  TRANSITION
+  ANIMATED_CHART
+  STORYBOARD
+  B_ROLL
+  WEBSITE_IMAGE
+  SHORTS_COVER
+}
+
+enum VisualBriefStatus {
+  DRAFT
+  PROMPT_APPROVED
+  EXPORTED
+}
+
+enum RealismClass {
+  ORIGINAL_GRAPHIC
+  STYLIZED
+  REALISTIC
+}
+
+enum DisclosureDecision {
+  NOT_APPLICABLE
+  PRODUCTION_ASSISTANCE_ONLY
+  DISCLOSE_SYNTHETIC
+  HUMAN_REVIEW_REQUIRED
+  BLOCKED
+}
+
+enum VisualAssetStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  BLOCKED
+}
+
+model VisualBrief {
+  id             String            @id @default(cuid())
+  contentId      String
+  kind           VisualKind
+  title          String
+  prompt         String
+  negativePrompt String?
+  styleNotes     String?
+  costCeiling    Float             @default(0)
+  status         VisualBriefStatus @default(DRAFT)
+  approvedBy     String?
+  createdBy      String
+  createdAt      DateTime          @default(now())
+
+  content ContentItem   @relation(fields: [contentId], references: [id])
+  assets  VisualAsset[]
+}
+
+model VisualAsset {
+  id                      String              @id @default(cuid())
+  briefId                 String
+  provider                String
+  model                   String
+  jobId                   String?
+  cost                    Float               @default(0)
+  generatedAt             DateTime            @default(now())
+  location                String?
+  aiGenerated             Boolean             @default(true)
+  presentedAsRealGameplay Boolean             @default(false)
+  realismClassification   RealismClass        @default(ORIGINAL_GRAPHIC)
+  disclosureDecision      DisclosureDecision?
+  status                  VisualAssetStatus   @default(PENDING_REVIEW)
+  rightsReviewerId        String?
+  reviewNotes             String?
+  rejectionReason         String?
+  finalUsage              String?
+  importedBy              String
+  createdAt               DateTime            @default(now())
+
+  brief VisualBrief @relation(fields: [briefId], references: [id])
 }
 
 // ---------- Audit (append-only, enforced by trigger) ----------

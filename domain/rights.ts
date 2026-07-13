@@ -127,5 +127,33 @@ export async function rightsBlockers(
     if (a.flagMassProducedAI) blockers.push(`Asset "${a.name}": mass-produced AI`);
     if (a.flagDeceptive) blockers.push(`Asset "${a.name}": deceptive`);
   }
+
+  // A submitted/approved contributor deliverable without a received rights
+  // release blocks readiness.
+  const missingReleases = await tx.assignment.count({
+    where: {
+      contentId,
+      status: { in: ["SUBMITTED", "APPROVED"] },
+      rightsReleaseStatus: "PENDING",
+    },
+  });
+  if (missingReleases > 0) {
+    blockers.push(`${missingReleases} contributor deliverable(s) missing a rights release`);
+  }
+
+  // Blocked (e.g. leaked-flagged) capture footage blocks readiness.
+  const blockedCaptures = await tx.captureSession.count({
+    where: { contentId, status: "BLOCKED" },
+  });
+  if (blockedCaptures > 0) blockers.push(`${blockedCaptures} blocked capture session(s)`);
+
+  // Imported visual assets that have not passed disclosure + rights review block
+  // readiness (blocked ones too); rejected assets are unused and do not block.
+  const unresolvedVisuals = await tx.visualAsset.count({
+    where: { brief: { contentId }, status: { in: ["PENDING_REVIEW", "BLOCKED"] } },
+  });
+  if (unresolvedVisuals > 0)
+    blockers.push(`${unresolvedVisuals} unreviewed/blocked visual asset(s)`);
+
   return [...new Set(blockers)];
 }

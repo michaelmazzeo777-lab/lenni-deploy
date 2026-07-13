@@ -10,19 +10,19 @@ State labels: `REALITY` = inspected/ran; `PROPOSED` = not implemented; `OPEN` = 
 
 All commands run from the repository root with a local PostgreSQL 16 instance.
 
-| Check                    | Command                                  | Result                                                                        |
-| ------------------------ | ---------------------------------------- | ----------------------------------------------------------------------------- |
-| Install                  | `pnpm install`                           | PASS                                                                          |
-| Format                   | `pnpm format:check`                      | PASS (Prettier, all files)                                                    |
-| Lint                     | `pnpm lint`                              | PASS (ESLint 9, next config)                                                  |
-| Types                    | `pnpm typecheck`                         | PASS (`tsc --noEmit`, strict + noUncheckedIndexedAccess)                      |
-| Migrations               | `prisma migrate deploy` (dev + test DBs) | PASS — 2 migrations (init incl. constraint SQL; packaging_experiment)         |
-| Seed                     | `pnpm db:seed`                           | PASS (8 users, 12 content, 3 sources, 7 claims, 2 revisions, 48 audit events) |
-| Unit + integration tests | `pnpm test`                              | PASS — 43/43 (8 files)                                                        |
-| Secret scan              | `pnpm test:secrets`                      | PASS — clean (all tracked + untracked files)                                  |
-| Production build         | `pnpm build`                             | PASS — 24 routes, no DB required at build                                     |
-| Browser e2e              | `pnpm test:e2e`                          | PASS — 3/3 (Chromium)                                                         |
-| Full chain               | `pnpm verify`                            | PASS                                                                          |
+| Check                    | Command                                  | Result                                                                                                                                           |
+| ------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Install                  | `pnpm install`                           | PASS                                                                                                                                             |
+| Format                   | `pnpm format:check`                      | PASS (Prettier, all files)                                                                                                                       |
+| Lint                     | `pnpm lint`                              | PASS (ESLint 9, next config)                                                                                                                     |
+| Types                    | `pnpm typecheck`                         | PASS (`tsc --noEmit`, strict + noUncheckedIndexedAccess)                                                                                         |
+| Migrations               | `prisma migrate deploy` (dev + test DBs) | PASS — 3 migrations (init incl. constraint SQL; packaging_experiment; distributed_production incl. AI-not-real-gameplay + leaked-capture CHECKs) |
+| Seed                     | `pnpm db:seed`                           | PASS (12 users incl. contributor roles, 12 content, 3 sources, 7 claims, 2 revisions, 61 audit events)                                           |
+| Unit + integration tests | `pnpm test`                              | PASS — 52/52 (9 files)                                                                                                                           |
+| Secret scan              | `pnpm test:secrets`                      | PASS — clean (all tracked + untracked files)                                                                                                     |
+| Production build         | `pnpm build`                             | PASS — 27 routes, no DB required at build                                                                                                        |
+| Browser e2e              | `pnpm test:e2e`                          | PASS — 4/4 (Chromium)                                                                                                                            |
+| Full chain               | `pnpm verify`                            | PASS                                                                                                                                             |
 
 Notes:
 
@@ -88,6 +88,39 @@ classification key, disclaimer) → record a correction → verify audit actions
 - **Packaging A/B experiments** (packaging tab): compare two title variants, then record a
   measured result (supported / contradicted / inconclusive) separated from the interpretation;
   a `PackagingExperiment` model + migration was added. Integration-tested; seeded example.
+
+### Distributed production slice (Contributor, Gameplay, Visual Production Manager) — REALITY
+
+- **Roles**: CONTRIBUTOR, NARRATOR, VIDEO_EDITOR, DESIGNER added; restricted contributors
+  may act only on their own assignments (`assertAssignmentAccess`, `listAssignmentsFor`).
+- **Contributors & assignments** (`/studio/contributors`): profiles (no payment/identity
+  data), 9 assignment kinds, submit → review (approve / revision / reject), rights-release
+  tracking; a submitted deliverable without a received release is a rights blocker.
+- **Gameplay production** (Production tab): ordered shot lists; capture sessions with
+  platform, version, settings, trials, HUD, licensed-music, mods declaration, file refs;
+  submit → retake-with-notes → replacement (supersedes) → approve; leaked-flagged footage is
+  auto-BLOCKED (DB CHECK) and can never be approved.
+- **Production handoff** (`/studio/handoff/[contentId]?format=md|json`): Markdown/JSON packet
+  with brief, script, shot list, approved captures/visuals, assignments, packaging, music
+  restrictions, rights notes, export checklist. Download only — never sent externally.
+- **Visual Production Manager** (Visuals tab): provider-neutral briefs (12 kinds) →
+  owner prompt+cost-ceiling approval → exported prompt packet with embedded rights
+  constraints → external/mock generation → import with ACTUAL provider/model/cost →
+  AI-disclosure + rights review → approve/reject/block. `MockVisualProvider` and
+  `ManualVisualProvider` work with zero credentials; `HiggsfieldProvider`,
+  `GeminiImageProvider`, `GeminiVideoProvider` exist but are DISABLED and throw
+  (`APPROVAL_REQUIRED`); no model name, price, quota, or entitlement is assumed.
+- **Containment**: DB CHECKs — AI visual can never be `presentedAsRealGameplay`; approved
+  visual requires a non-BLOCKED disclosure decision; leaked capture must be BLOCKED.
+  `rightsBlockers` now also gates READY on missing releases, blocked captures, and
+  unreviewed/blocked visual assets.
+- **Tests**: 9-test integration suite covering the full 16-step multi-role chain (owner →
+  researcher → mock AI → assignment → capture → retake → replacement → visual brief →
+  manual+mock import → rights approval → script → packaging → approvals → publish →
+  correction → audit) plus negatives (leak block, missing release blocker, AI-as-real-gameplay
+  refusal at domain AND DB level, unreviewed-visual blocker, contributor isolation, permission
+  bypass attempts, idempotent duplicate import, over-ceiling cost refusal, disabled providers).
+  Browser e2e verifies the seeded pipeline UI and contributor isolation.
 
 ### Partial / simplified — PROPOSED to deepen further
 

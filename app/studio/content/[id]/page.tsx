@@ -25,6 +25,8 @@ import {
   publishAction,
   createCorrectionAction,
 } from "@/app/studio/actions";
+import { ProductionTab } from "./production-tab";
+import { VisualsTab } from "./visuals-tab";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +34,8 @@ const TABS = [
   "overview",
   "evidence",
   "script",
+  "production",
+  "visuals",
   "assets",
   "packaging",
   "ai",
@@ -100,6 +104,8 @@ export default async function ContentDetail({
       {tab === "overview" && <Overview actor={actor} content={content} readiness={readiness} />}
       {tab === "evidence" && <Evidence actor={actor} contentId={id} />}
       {tab === "script" && <Script actor={actor} contentId={id} />}
+      {tab === "production" && <ProductionTab actor={actor} contentId={id} />}
+      {tab === "visuals" && <VisualsTab actor={actor} contentId={id} />}
       {tab === "assets" && <Assets actor={actor} contentId={id} />}
       {tab === "packaging" && <Packaging actor={actor} contentId={id} />}
       {tab === "ai" && <AIWorkbench actor={actor} contentId={id} selectedGen={sp.gen} />}

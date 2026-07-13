@@ -8,6 +8,19 @@ import { saveScriptVersion } from "@/domain/script";
 import { createAsset, reviewAsset } from "@/domain/rights";
 import { createTitleVariant, createThumbnailVariant } from "@/domain/packaging";
 import { createPackagingExperiment, concludePackagingExperiment } from "@/domain/experiments";
+import {
+  createContributor,
+  createAssignment,
+  submitAssignment,
+  recordRelease,
+} from "@/domain/contributors";
+import { createShot, submitCapture, reviewCapture } from "@/domain/capture";
+import {
+  createVisualBrief,
+  approveVisualPrompt,
+  generateWithMock,
+  reviewVisualAsset,
+} from "@/domain/visuals";
 import { grantApproval } from "@/domain/approval";
 import { publishPublicArticle } from "@/domain/publication";
 import { createCorrection } from "@/domain/correction";
@@ -21,6 +34,12 @@ async function truncateAll() {
   // resets even the append-only / immutable tables for a repeatable seed.
   const tables = [
     "AuditEvent",
+    "VisualAsset",
+    "VisualBrief",
+    "CaptureSession",
+    "Shot",
+    "Assignment",
+    "Contributor",
     "ContentStatusHistory",
     "AnalyticsSnapshot",
     "UpdateTask",
@@ -92,6 +111,11 @@ async function main() {
   await makeUser("Rin Rights", "rights@leonida.test", [Role.RIGHTS_REVIEWER]);
   await makeUser("Ana Analyst", "analyst@leonida.test", [Role.ANALYST]);
   await makeUser("Reed Only", "readonly@leonida.test", [Role.READ_ONLY]);
+  const capUser = await makeUser("Cam Capture", "capture@leonida.test", [Role.CONTRIBUTOR]);
+  await makeUser("Nia Narrator", "narrator@leonida.test", [Role.NARRATOR]);
+  await makeUser("Vic VideoEditor", "videoeditor@leonida.test", [Role.VIDEO_EDITOR]);
+  const designerUser = await makeUser("Dee Designer", "designer@leonida.test", [Role.DESIGNER]);
+  void designerUser;
 
   // ---- Sources (official + reputable; no copyrighted media) ----
   const officialAnnounce = await createSource(researcher, {
@@ -321,6 +345,67 @@ async function main() {
       subscribersGained: 430,
       importedBy: owner.userId,
     },
+  });
+
+  // ---- Distributed production demo on pilot #2 ----
+  const pilot2 = pilots[1]!;
+  const camProfile = await createContributor(owner, {
+    displayName: "Cam Capture",
+    specialty: "Gameplay capture",
+    userId: capUser.userId,
+  });
+  const capAssignment = await createAssignment(owner, {
+    contentId: pilot2.id,
+    contributorId: camProfile.id,
+    kind: "GAMEPLAY_CAPTURE",
+    deliverableNotes: "Capture edition-comparison shots at matched settings",
+  });
+  await createShot(editor, {
+    contentId: pilot2.id,
+    order: 1,
+    title: "Edition menu comparison",
+    description: "Side-by-side of Standard vs Ultimate contents screen",
+  });
+  const take1 = await submitCapture(capUser, {
+    contentId: pilot2.id,
+    assignmentId: capAssignment.id,
+    platform: "PlayStation 5",
+    gameVersion: "1.0",
+    fileReference: "pilot2-take1.mp4",
+    trialCount: 2,
+  });
+  await reviewCapture(editor, {
+    captureId: take1.id,
+    decision: "RETAKE_REQUESTED",
+    reviewNotes: "Menu text illegible at 1080p; recapture at 4K.",
+  });
+  const take2 = await submitCapture(capUser, {
+    contentId: pilot2.id,
+    assignmentId: capAssignment.id,
+    platform: "PlayStation 5",
+    gameVersion: "1.0",
+    fileReference: "pilot2-take2-4k.mp4",
+    supersedesId: take1.id,
+  });
+  await reviewCapture(owner, { captureId: take2.id, decision: "APPROVED" });
+  await submitAssignment(capUser, capAssignment.id, "4K retake delivered");
+  await recordRelease(owner, capAssignment.id);
+
+  const visualBrief = await createVisualBrief(editor, {
+    contentId: pilot2.id,
+    kind: "DIAGRAM",
+    title: "Edition value diagram",
+    prompt: "Original diagram comparing edition contents by evidence grade.",
+    negativePrompt: "No GTA gameplay imitation, no Rockstar marks",
+    costCeiling: 0,
+  });
+  await approveVisualPrompt(owner, visualBrief.id);
+  const { asset: mockVisual } = await generateWithMock(editor, visualBrief.id);
+  await reviewVisualAsset(owner, {
+    assetId: mockVisual.id,
+    decision: "APPROVED",
+    disclosureDecision: "PRODUCTION_ASSISTANCE_ONLY",
+    finalUsage: "Supporting diagram",
   });
 
   // ---- Blocked example on pilot #2: a leaked asset prevents publication ----
