@@ -18,10 +18,10 @@ All commands run from the repository root with a local PostgreSQL 16 instance.
 | Types                    | `pnpm typecheck`                         | PASS (`tsc --noEmit`, strict + noUncheckedIndexedAccess)                      |
 | Migrations               | `prisma migrate deploy` (dev + test DBs) | PASS (1 migration incl. constraint SQL)                                       |
 | Seed                     | `pnpm db:seed`                           | PASS (8 users, 12 content, 3 sources, 7 claims, 2 revisions, 45 audit events) |
-| Unit + integration tests | `pnpm test`                              | PASS — 30/30 (5 files)                                                        |
-| Secret scan              | `pnpm test:secrets`                      | PASS — clean across 74 files                                                  |
-| Production build         | `pnpm build`                             | PASS — 17 routes, no DB required at build                                     |
-| Browser e2e              | `pnpm test:e2e`                          | PASS — 2/2 (Chromium)                                                         |
+| Unit + integration tests | `pnpm test`                              | PASS — 39/39 (7 files)                                                        |
+| Secret scan              | `pnpm test:secrets`                      | PASS — clean (all tracked + untracked files)                                  |
+| Production build         | `pnpm build`                             | PASS — 22 routes, no DB required at build                                     |
+| Browser e2e              | `pnpm test:e2e`                          | PASS — 3/3 (Chromium)                                                         |
 | Full chain               | `pnpm verify`                            | PASS                                                                          |
 
 Notes:
@@ -71,24 +71,32 @@ classification key, disclaimer) → record a correction → verify audit actions
 - Seed: 3 pilot videos + 9 Shorts, sources, claims incl. blocked LEAKED, variants, one
   correction, one analytics snapshot, one published guide, one blocked leaked asset.
 
-### Partial / simplified — PROPOSED to deepen in Phase 2
+### Growth & Administration slice (added after Phase 1) — REALITY
 
-- Studio navigation surfaces the core screens (dashboard, backlog, sources, claims, content
-  detail with 10 tabs, audit). Calendar, kanban board, dedicated conflicts/stale views,
-  analytics dashboards, packaging experiments, prompt-template admin, and role-management UI
-  are **not yet built as separate screens** (data model and audit support exist).
-- Analytics snapshots are stored/seeded but have no interpretation UI yet.
-- `ContentBrief`, `UpdateTask`, `ContentRelation` exist in the schema and are written by seed/
-  corrections, but have limited dedicated UI.
+- **Production board** (`/studio/board`): content grouped into workflow-state columns.
+- **Update queue & stale evidence** (`/studio/updates`): open update tasks with resolve action;
+  flagging a source stale opens deduplicated update tasks for every reliant content item
+  (`markSourceStale` / `resolveUpdateTask`). Integration-tested.
+- **Analytics** (`/studio/analytics`): manual snapshot import + heuristic scorecard signals
+  (CTR / hook / depth) with good/watch/weak grading. Unit + integration tested.
+- **Users & roles** (`/studio/admin/roles`, Owner-only): assign/remove roles with a
+  last-Owner-protection guard and audit. Integration-tested.
+- **Export** (`/studio/export/{claims|sources|content|audit}?format=csv|json`): workspace-scoped,
+  no secrets; used by an e2e assertion.
+
+### Partial / simplified — PROPOSED to deepen further
+
+- Calendar view, packaging experiments, prompt-template admin, and richer conflict views remain
+  `PROPOSED` (data model + audit support exist).
+- `ContentBrief` and `ContentRelation` exist in the schema with limited dedicated UI.
 - Anthropic provider is implemented behind the interface but **not exercised** (no key; mock
   is used). `APPROVAL_REQUIRED` before any real key/spend.
 
-### Not done / out of scope this slice
+### Not done / out of scope
 
-- YouTube/Google/newsletter/storage/analytics integrations — **disabled by design**;
+- YouTube/Google/newsletter/storage/external-analytics integrations — **disabled by design**;
   `APPROVAL_REQUIRED`.
 - Production deployment/hosting/auth provider — `OPEN` / `APPROVAL_REQUIRED`.
-- Import/export (CSV/JSON) — `PROPOSED` (Phase 2).
 
 ## Acceptance-test mapping (docs/spec/11)
 

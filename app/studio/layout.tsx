@@ -23,10 +23,23 @@ export default async function StudioLayout({ children }: { children: React.React
 
         <h2>Content</h2>
         <Link href="/studio/content">Backlog</Link>
+        <Link href="/studio/board">Production board</Link>
+        <Link href="/studio/updates">Update queue</Link>
 
         <h2>Research</h2>
         <Link href="/studio/sources">Sources</Link>
         <Link href="/studio/claims">Claims</Link>
+
+        <h2>Growth</h2>
+        <Link href="/studio/analytics">Analytics</Link>
+
+        <h2>Administration</h2>
+        {actor.roles.includes("OWNER") ? (
+          <Link href="/studio/admin/roles">Users &amp; roles</Link>
+        ) : null}
+        <Link href="/studio/export/content?format=csv">Export content (CSV)</Link>
+        <Link href="/studio/export/claims?format=csv">Export claims (CSV)</Link>
+        <Link href="/studio/export/audit?format=json">Export audit (JSON)</Link>
 
         <h2>Public</h2>
         <Link href="/" target="_blank">
