@@ -19,6 +19,7 @@ import {
   importVisualResult,
   reviewVisualAsset,
 } from "@/domain/visuals";
+import { uploadStoredFile, scanStoredFile, discardRejectedFile } from "@/domain/storage";
 
 function errMsg(e: unknown): string {
   if (isDomainError(e)) return e.message;
@@ -266,6 +267,61 @@ export async function reviewVisualAssetAction(fd: FormData) {
       finalUsage: opt(fd, "finalUsage"),
     });
     revalidatePath(`/studio/content/${id}`);
+  } catch (e) {
+    to = `${to}&error=${encodeURIComponent(errMsg(e))}`;
+  }
+  redirect(to);
+}
+
+// ---- Local file storage ----
+
+export async function uploadAssetFileAction(fd: FormData) {
+  const actor = await requireActor();
+  const contentId = s(fd, "contentId");
+  const assetId = s(fd, "assetId");
+  let to = `/studio/content/${contentId}?tab=assets`;
+  try {
+    const file = fd.get("file");
+    if (!(file instanceof File) || file.size === 0) {
+      throw new Error("Choose a file to upload");
+    }
+    const data = Buffer.from(await file.arrayBuffer());
+    await uploadStoredFile(actor, {
+      ownerType: "asset",
+      ownerId: assetId,
+      filename: file.name,
+      mediaType: file.type || "application/octet-stream",
+      data,
+    });
+    revalidatePath(`/studio/content/${contentId}`);
+  } catch (e) {
+    to = `${to}&error=${encodeURIComponent(errMsg(e))}`;
+  }
+  redirect(to);
+}
+
+export async function scanStoredFileAction(fd: FormData) {
+  const actor = await requireActor();
+  const contentId = s(fd, "contentId");
+  const tab = opt(fd, "tab") ?? "assets";
+  let to = `/studio/content/${contentId}?tab=${tab}`;
+  try {
+    await scanStoredFile(actor, s(fd, "storedFileId"));
+    revalidatePath(`/studio/content/${contentId}`);
+  } catch (e) {
+    to = `${to}&error=${encodeURIComponent(errMsg(e))}`;
+  }
+  redirect(to);
+}
+
+export async function discardRejectedFileAction(fd: FormData) {
+  const actor = await requireActor();
+  const contentId = s(fd, "contentId");
+  const tab = opt(fd, "tab") ?? "assets";
+  let to = `/studio/content/${contentId}?tab=${tab}`;
+  try {
+    await discardRejectedFile(actor, s(fd, "storedFileId"));
+    revalidatePath(`/studio/content/${contentId}`);
   } catch (e) {
     to = `${to}&error=${encodeURIComponent(errMsg(e))}`;
   }

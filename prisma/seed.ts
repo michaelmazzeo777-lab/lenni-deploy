@@ -6,6 +6,7 @@ import { createSource, createClaim, reviewClaim, linkClaimToContent } from "@/do
 import { createContent } from "@/domain/content";
 import { saveScriptVersion } from "@/domain/script";
 import { createAsset, reviewAsset } from "@/domain/rights";
+import { uploadStoredFile, scanStoredFile } from "@/domain/storage";
 import { createTitleVariant, createThumbnailVariant } from "@/domain/packaging";
 import { createPackagingExperiment, concludePackagingExperiment } from "@/domain/experiments";
 import {
@@ -50,6 +51,7 @@ async function truncateAll() {
     "ThumbnailVariant",
     "TitleVariant",
     "RightsReview",
+    "StoredFile",
     "Asset",
     "AIGeneration",
     "ScriptVersion",
@@ -267,6 +269,18 @@ async function main() {
     licenseBasis: "Self-authored original graphic",
   });
   await reviewAsset(owner, { assetId: asset.id, riskLevel: "LOW", decision: "APPROVED" });
+
+  // Demonstrate the local quarantine-first storage flow: upload a tiny original
+  // placeholder graphic (a PNG signature only — no real media) and scan it clean.
+  const titleCardBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+  const titleCardFile = await uploadStoredFile(editor, {
+    ownerType: "asset",
+    ownerId: asset.id,
+    filename: "title-card.png",
+    mediaType: "image/png",
+    data: titleCardBytes,
+  });
+  await scanStoredFile(owner, titleCardFile.id);
 
   const titleA = await createTitleVariant(editor, {
     contentId: flagship.id,

@@ -25,6 +25,11 @@ import {
   publishAction,
   createCorrectionAction,
 } from "@/app/studio/actions";
+import {
+  uploadAssetFileAction,
+  scanStoredFileAction,
+  discardRejectedFileAction,
+} from "@/app/studio/production-actions";
 import { ProductionTab } from "./production-tab";
 import { VisualsTab } from "./visuals-tab";
 
@@ -324,11 +329,16 @@ async function Script({ actor, contentId }: { actor: Actor; contentId: string })
 // ---------- Assets ----------
 async function Assets({ actor, contentId }: { actor: Actor; contentId: string }) {
   const [assets, blockers] = await Promise.all([
-    prisma.asset.findMany({ where: { contentId }, include: { reviews: true } }),
+    prisma.asset.findMany({
+      where: { contentId },
+      include: { reviews: true, storedFile: true },
+    }),
     rightsBlockers(contentId),
   ]);
   const mayCreate = can(actor, "asset.create");
   const mayReview = can(actor, "rights.review");
+  const mayUpload = can(actor, "storage.upload");
+  const mayScan = can(actor, "storage.scan");
 
   return (
     <div>
@@ -345,6 +355,7 @@ async function Assets({ actor, contentId }: { actor: Actor; contentId: string })
               <tr>
                 <th>Name</th>
                 <th>Ownership</th>
+                <th>File</th>
                 <th>Status</th>
                 <th>Review</th>
               </tr>
@@ -367,6 +378,72 @@ async function Assets({ actor, contentId }: { actor: Actor; contentId: string })
                     ) : null}
                   </td>
                   <td className="muted">{a.ownership}</td>
+                  <td>
+                    {a.storedFile ? (
+                      <div style={{ fontSize: "0.8rem" }}>
+                        <span
+                          className={`badge ${
+                            a.storedFile.quarantineStatus === "CLEAN"
+                              ? "CONFIRMED"
+                              : a.storedFile.quarantineStatus === "REJECTED"
+                                ? "LEAKED"
+                                : "UNVERIFIED"
+                          }`}
+                        >
+                          {a.storedFile.quarantineStatus}
+                        </span>
+                        <div className="muted" style={{ fontSize: "0.72rem" }}>
+                          {a.storedFile.originalName} ({a.storedFile.sizeBytes}b)
+                        </div>
+                        {a.storedFile.scanNotes ? (
+                          <div className="muted" style={{ fontSize: "0.72rem" }}>
+                            {a.storedFile.scanNotes}
+                          </div>
+                        ) : null}
+                        {mayScan && a.storedFile.quarantineStatus === "PENDING" ? (
+                          <form action={scanStoredFileAction}>
+                            <input type="hidden" name="contentId" value={contentId} />
+                            <input type="hidden" name="tab" value="assets" />
+                            <input type="hidden" name="storedFileId" value={a.storedFile.id} />
+                            <button type="submit" className="secondary" style={{ marginTop: 4 }}>
+                              Scan
+                            </button>
+                          </form>
+                        ) : null}
+                        {mayUpload && a.storedFile.quarantineStatus === "REJECTED" ? (
+                          <form action={discardRejectedFileAction}>
+                            <input type="hidden" name="contentId" value={contentId} />
+                            <input type="hidden" name="tab" value="assets" />
+                            <input type="hidden" name="storedFileId" value={a.storedFile.id} />
+                            <button type="submit" className="secondary" style={{ marginTop: 4 }}>
+                              Discard
+                            </button>
+                          </form>
+                        ) : null}
+                      </div>
+                    ) : mayUpload ? (
+                      <form
+                        action={uploadAssetFileAction}
+                        encType="multipart/form-data"
+                        className="row"
+                        style={{ gap: 4 }}
+                      >
+                        <input type="hidden" name="contentId" value={contentId} />
+                        <input type="hidden" name="assetId" value={a.id} />
+                        <input
+                          type="file"
+                          name="file"
+                          accept="image/png,image/jpeg,image/webp,image/gif"
+                          required
+                        />
+                        <button type="submit" className="secondary">
+                          Upload
+                        </button>
+                      </form>
+                    ) : (
+                      <span className="muted">none</span>
+                    )}
+                  </td>
                   <td>{a.status}</td>
                   <td>
                     {mayReview && a.status === "PENDING" ? (
@@ -396,7 +473,7 @@ async function Assets({ actor, contentId }: { actor: Actor; contentId: string })
               ))}
               {assets.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="muted">
+                  <td colSpan={5} className="muted">
                     No assets yet.
                   </td>
                 </tr>

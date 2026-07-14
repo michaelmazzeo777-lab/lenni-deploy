@@ -1,7 +1,7 @@
 # Implementation Status
 
 **Status:** Draft — Pending Mike Review — Live Validation Required
-**Last updated:** 2026-07-13
+**Last updated:** 2026-07-14
 
 State labels: `REALITY` = inspected/ran; `PROPOSED` = not implemented; `OPEN` = needs decision;
 `APPROVAL_REQUIRED` = Mike must approve the exact action.
@@ -10,19 +10,19 @@ State labels: `REALITY` = inspected/ran; `PROPOSED` = not implemented; `OPEN` = 
 
 All commands run from the repository root with a local PostgreSQL 16 instance.
 
-| Check                    | Command                                  | Result                                                                                                                                           |
-| ------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Install                  | `pnpm install`                           | PASS                                                                                                                                             |
-| Format                   | `pnpm format:check`                      | PASS (Prettier, all files)                                                                                                                       |
-| Lint                     | `pnpm lint`                              | PASS (ESLint 9, next config)                                                                                                                     |
-| Types                    | `pnpm typecheck`                         | PASS (`tsc --noEmit`, strict + noUncheckedIndexedAccess)                                                                                         |
-| Migrations               | `prisma migrate deploy` (dev + test DBs) | PASS — 3 migrations (init incl. constraint SQL; packaging_experiment; distributed_production incl. AI-not-real-gameplay + leaked-capture CHECKs) |
-| Seed                     | `pnpm db:seed`                           | PASS (12 users incl. contributor roles, 12 content, 3 sources, 7 claims, 2 revisions, 61 audit events)                                           |
-| Unit + integration tests | `pnpm test`                              | PASS — 52/52 (9 files)                                                                                                                           |
-| Secret scan              | `pnpm test:secrets`                      | PASS — clean (all tracked + untracked files)                                                                                                     |
-| Production build         | `pnpm build`                             | PASS — 27 routes, no DB required at build                                                                                                        |
-| Browser e2e              | `pnpm test:e2e`                          | PASS — 4/4 (Chromium)                                                                                                                            |
-| Full chain               | `pnpm verify`                            | PASS                                                                                                                                             |
+| Check                    | Command                                  | Result                                                                                                                                                                                                          |
+| ------------------------ | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Install                  | `pnpm install`                           | PASS                                                                                                                                                                                                            |
+| Format                   | `pnpm format:check`                      | PASS (Prettier, all files)                                                                                                                                                                                      |
+| Lint                     | `pnpm lint`                              | PASS (ESLint 9, next config)                                                                                                                                                                                    |
+| Types                    | `pnpm typecheck`                         | PASS (`tsc --noEmit`, strict + noUncheckedIndexedAccess)                                                                                                                                                        |
+| Migrations               | `prisma migrate deploy` (dev + test DBs) | PASS — 4 migrations (init incl. constraint SQL; packaging_experiment; distributed_production incl. AI-not-real-gameplay + leaked-capture CHECKs; local_file_storage incl. single-owner + scan-timestamp CHECKs) |
+| Seed                     | `pnpm db:seed`                           | PASS (12 users incl. contributor roles, 12 content, 3 sources, 7 claims, 2 revisions, 63 audit events)                                                                                                          |
+| Unit + integration tests | `pnpm test`                              | PASS — 63/63 (10 files)                                                                                                                                                                                         |
+| Secret scan              | `pnpm test:secrets`                      | PASS — clean (all tracked + untracked files)                                                                                                                                                                    |
+| Production build         | `pnpm build`                             | PASS — 27 routes, no DB required at build                                                                                                                                                                       |
+| Browser e2e              | `pnpm test:e2e`                          | PASS — 5/5 (Chromium)                                                                                                                                                                                           |
+| Full chain               | `pnpm verify`                            | PASS                                                                                                                                                                                                            |
 
 Notes:
 
@@ -121,6 +121,35 @@ classification key, disclaimer) → record a correction → verify audit actions
   refusal at domain AND DB level, unreviewed-visual blocker, contributor isolation, permission
   bypass attempts, idempotent duplicate import, over-ceiling cost refusal, disabled providers).
   Browser e2e verifies the seeded pipeline UI and contributor isolation.
+
+### Local file storage slice (quarantine-first `AssetStorage`) — REALITY
+
+- **`AssetStorage` interface + `LocalAssetStorage`** (`lib/storage/`): real local-disk
+  read/write/move/remove behind a provider-neutral seam (an S3-compatible adapter can implement
+  the same interface later, per docs/spec/03). Path traversal is rejected at the provider layer
+  (verified: writes/reads outside the configured root throw).
+- **`StoredFile` model + migration**: tracks real uploaded bytes for either an `Asset` or a
+  `VisualAsset` (exactly one owner, DB-enforced), with checksum (SHA-256), size, media type, and
+  a `quarantineStatus` (`PENDING` → `CLEAN`/`REJECTED`). A CHECK ties `scannedAt` presence to a
+  terminal status so a file can't be silently marked scanned without a timestamp.
+- **Quarantine-first flow** (`domain/storage.ts`): `uploadStoredFile` validates size (≤10 MiB),
+  extension allowlist, and non-empty content **before** touching disk, then writes to a
+  quarantine path; the owning Asset/VisualAsset's `location` is **not** updated yet.
+  `scanStoredFile` runs a deterministic mock content scan (rejects a test malware marker and
+  double-extension filenames), and only on a pass moves the file to a clean path and updates the
+  owner's `location`. `discardRejectedFile` removes a rejected file's bytes and record.
+  Re-uploading before a scan replaces the pending file; re-uploading after a CLEAN/REJECTED scan
+  is refused (must discard first).
+- **Readiness gate**: `rightsBlockers` now also blocks on any `PENDING` or `REJECTED` stored file
+  attached to the content's assets or visual assets — an uploaded file can't back a published
+  asset until it has actually passed the scan.
+- **UI**: Assets tab gained a File column with upload (native file input, `image/png|jpeg|webp|gif`
+  accept filter), a Scan action (Owner/Rights Reviewer), and a Discard action for rejected files.
+- **Tests**: 11 integration tests (upload/scan/discard happy path with real byte round-trip,
+  malware-marker rejection, double-extension rejection, size/extension/empty-file validation,
+  re-upload semantics, dual-owner support for both Asset and VisualAsset, cross-workspace
+  isolation, authorization boundaries, and `LocalAssetStorage` path-escape refusal) plus a
+  browser e2e test driving a real file upload through the UI to a CLEAN scan result.
 
 ### Partial / simplified — PROPOSED to deepen further
 

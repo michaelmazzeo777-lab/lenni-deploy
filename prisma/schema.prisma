@@ -547,6 +547,7 @@ model Asset {
 
   content ContentItem   @relation(fields: [contentId], references: [id])
   reviews RightsReview[]
+  storedFile StoredFile?
 }
 
 model RightsReview {
@@ -931,6 +932,39 @@ model VisualAsset {
   createdAt               DateTime            @default(now())
 
   brief VisualBrief @relation(fields: [briefId], references: [id])
+  storedFile StoredFile?
+}
+
+// ---------- Local file storage (quarantine-first) ----------
+
+enum QuarantineStatus {
+  PENDING
+  CLEAN
+  REJECTED
+}
+
+// Tracks a real uploaded/generated file on local disk. Exactly one of
+// assetId/visualAssetId is set (enforced by DB CHECK). New files always start
+// PENDING in quarantine; only a scan can promote to CLEAN or REJECTED, and
+// only a CLEAN file's path may back the owning record's public location.
+model StoredFile {
+  id               String           @id @default(cuid())
+  workspaceId      String
+  assetId          String?          @unique
+  visualAssetId    String?          @unique
+  originalName     String
+  mediaType        String
+  sizeBytes        Int
+  checksumSha256   String
+  storagePath      String
+  quarantineStatus QuarantineStatus @default(PENDING)
+  scanNotes        String?
+  uploadedBy       String
+  createdAt        DateTime         @default(now())
+  scannedAt        DateTime?
+
+  asset       Asset?       @relation(fields: [assetId], references: [id])
+  visualAsset VisualAsset? @relation(fields: [visualAssetId], references: [id])
 }
 
 // ---------- Audit (append-only, enforced by trigger) ----------

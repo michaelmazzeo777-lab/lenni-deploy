@@ -155,5 +155,17 @@ export async function rightsBlockers(
   if (unresolvedVisuals > 0)
     blockers.push(`${unresolvedVisuals} unreviewed/blocked visual asset(s)`);
 
+  // Uploaded files still in quarantine (or rejected by the content scan)
+  // block readiness — the asset's real location is not yet trustworthy.
+  const unresolvedFiles = await tx.storedFile.count({
+    where: {
+      OR: [{ asset: { contentId } }, { visualAsset: { brief: { contentId } } }],
+      quarantineStatus: { in: ["PENDING", "REJECTED"] },
+    },
+  });
+  if (unresolvedFiles > 0) {
+    blockers.push(`${unresolvedFiles} uploaded file(s) awaiting or failing content scan`);
+  }
+
   return [...new Set(blockers)];
 }

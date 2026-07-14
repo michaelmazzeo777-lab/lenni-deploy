@@ -35,6 +35,8 @@ export type Capability =
   | "visual.import"
   | "visual.review"
   | "handoff.export"
+  | "storage.upload"
+  | "storage.scan"
   | "audit.read";
 
 const MATRIX: Record<Capability, Role[]> = {
@@ -78,6 +80,8 @@ const MATRIX: Record<Capability, Role[]> = {
   "visual.import": [Role.OWNER, Role.EDITOR, Role.PRODUCER, Role.DESIGNER],
   "visual.review": [Role.OWNER, Role.RIGHTS_REVIEWER],
   "handoff.export": [Role.OWNER, Role.EDITOR, Role.PRODUCER],
+  "storage.upload": [Role.OWNER, Role.EDITOR, Role.PRODUCER, Role.DESIGNER],
+  "storage.scan": [Role.OWNER, Role.RIGHTS_REVIEWER],
   "audit.read": [
     Role.OWNER,
     Role.EDITOR,

@@ -108,3 +108,17 @@ item is disambiguated with a stable id suffix. Reason: `PublicArticleRevision` e
 **Decision:** Integration tests run against a dedicated `fieldguide_test` database; each test
 creates an isolated workspace so files can share the DB. Playwright reseeds `fieldguide` in a
 global setup and runs against a production `next start` server.
+
+## Local file storage: quarantine-first, image-only for MVP
+
+**Decision:** `AssetStorage` is a small provider-neutral interface (`lib/storage/types.ts`)
+backed today by `LocalAssetStorage`, which writes real bytes under a gitignored
+`STORAGE_ROOT` (default `./.data/storage`) with path-escape rejection. Uploaded files always
+land in a quarantine path first; a deterministic mock content scan (`domain/storage.ts`) must
+pass before the file is moved to a clean path and the owning `Asset`/`VisualAsset` record's
+`location` is updated. Reason: matches the spec's "AssetStorage interface; local
+metadata/placeholder implementation for MVP; S3-compatible adapter later," while adding a real
+quarantine gate so an unreviewed or rejected upload can never silently become an approved
+asset's location. Scope is deliberately narrowed to image files (png/jpg/jpeg/webp/gif, ≤10 MiB)
+for this slice — gameplay capture video remains a `fileReference` string (external storage),
+since browser-uploading multi-gigabyte footage through this app is out of scope for the MVP.

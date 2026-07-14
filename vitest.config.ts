@@ -25,6 +25,7 @@ export default defineConfig({
       AI_PROVIDER: "mock",
       AI_ENABLED: "true",
       APP_BASE_URL: "http://localhost:3000",
+      STORAGE_ROOT: "./.data/storage-test",
     },
   },
 });
