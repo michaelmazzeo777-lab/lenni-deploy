@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireActor } from "@/lib/auth/context";
+import { requireStudioActor } from "@/lib/auth/guard";
 import { prisma } from "@/lib/db";
 import { can, canGrantScope } from "@/lib/permissions";
 import { WORKFLOW_ORDER } from "@/domain/workflow";
@@ -57,7 +57,7 @@ export default async function ContentDetail({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const actor = await requireActor();
+  const actor = await requireStudioActor();
   const { id } = await params;
   const sp = await searchParams;
   const tab = (TABS as readonly string[]).includes(sp.tab ?? "") ? sp.tab! : "overview";

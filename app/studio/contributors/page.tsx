@@ -1,4 +1,4 @@
-import { requireActor } from "@/lib/auth/context";
+import { requireStudioActor } from "@/lib/auth/guard";
 import { prisma } from "@/lib/db";
 import { can } from "@/lib/permissions";
 import { listAssignmentsFor, isRestrictedContributor } from "@/domain/contributors";
@@ -20,7 +20,7 @@ export default async function ContributorsPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const actor = await requireActor();
+  const actor = await requireStudioActor();
   const { error } = await searchParams;
   const restricted = isRestrictedContributor(actor);
   const mayManage = can(actor, "contributor.manage");

@@ -1,11 +1,11 @@
-import { requireActor } from "@/lib/auth/context";
+import { requireStudioActor } from "@/lib/auth/guard";
 import { prisma } from "@/lib/db";
 
 export const metadata = { title: "Audit log — Field Guide Studio" };
 export const dynamic = "force-dynamic";
 
 export default async function AuditPage() {
-  const actor = await requireActor();
+  const actor = await requireStudioActor();
   const events = await prisma.auditEvent.findMany({
     where: { workspaceId: actor.workspaceId },
     orderBy: { createdAt: "desc" },

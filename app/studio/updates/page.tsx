@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireActor } from "@/lib/auth/context";
+import { requireStudioActor } from "@/lib/auth/guard";
 import { prisma } from "@/lib/db";
 import { can } from "@/lib/permissions";
 import { Banner, humanStatus } from "@/app/_ui";
@@ -13,7 +13,7 @@ export default async function UpdatesPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const actor = await requireActor();
+  const actor = await requireStudioActor();
   const { error } = await searchParams;
   const now = new Date();
 

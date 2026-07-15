@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireActor } from "@/lib/auth/context";
+import { requireStudioActor } from "@/lib/auth/guard";
 import { prisma } from "@/lib/db";
 import { humanStatus } from "@/app/_ui";
 
@@ -7,7 +7,7 @@ export const metadata = { title: "Dashboard — Field Guide Studio" };
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
-  const actor = await requireActor();
+  const actor = await requireStudioActor();
   const ws = actor.workspaceId;
 
   const [content, sources, claims, pendingClaims, generations, published, openCorrections] =

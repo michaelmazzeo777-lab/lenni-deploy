@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireActor } from "@/lib/auth/context";
+import { requireStudioActor } from "@/lib/auth/guard";
 import { prisma } from "@/lib/db";
 import { humanStatus } from "@/app/_ui";
 
@@ -13,7 +13,7 @@ function startOfDay(d: Date): Date {
 }
 
 export default async function CalendarPage() {
-  const actor = await requireActor();
+  const actor = await requireStudioActor();
   const items = await prisma.contentItem.findMany({
     where: { workspaceId: actor.workspaceId, deletedAt: null, dueAt: { not: null } },
     orderBy: { dueAt: "asc" },

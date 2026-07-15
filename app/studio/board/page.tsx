@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireActor } from "@/lib/auth/context";
+import { requireStudioActor } from "@/lib/auth/guard";
 import { prisma } from "@/lib/db";
 import { WORKFLOW_ORDER } from "@/domain/workflow";
 import { humanStatus } from "@/app/_ui";
@@ -8,7 +8,7 @@ export const metadata = { title: "Production board — Field Guide Studio" };
 export const dynamic = "force-dynamic";
 
 export default async function BoardPage() {
-  const actor = await requireActor();
+  const actor = await requireStudioActor();
   const items = await prisma.contentItem.findMany({
     where: { workspaceId: actor.workspaceId, deletedAt: null },
     orderBy: [{ priority: "asc" }, { updatedAt: "desc" }],

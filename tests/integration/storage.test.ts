@@ -164,6 +164,26 @@ describe("local file storage: upload + quarantine + scan", () => {
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
+  it("rejects a non-image payload renamed with an allowed extension (byte sniff)", async () => {
+    const { asset } = await contentWithAsset();
+    // Allowed extension + image/png media type, but the bytes are HTML, not a
+    // real image. Must be refused before anything is written to disk.
+    const fakeImage = Buffer.from("<html><script>alert(1)</script></html>", "utf8");
+    await expect(
+      uploadStoredFile(editor, {
+        ownerType: "asset",
+        ownerId: asset.id,
+        filename: "payload.png",
+        mediaType: "image/png",
+        data: fakeImage,
+      }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+
+    // Nothing was persisted for this asset.
+    const count = await prisma.storedFile.count({ where: { assetId: asset.id } });
+    expect(count).toBe(0);
+  });
+
   it("re-uploading before scan replaces the pending file; cannot re-upload after scan", async () => {
     const { asset } = await contentWithAsset();
     const first = await uploadStoredFile(editor, {

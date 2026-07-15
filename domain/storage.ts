@@ -24,6 +24,46 @@ function extensionOf(filename: string): string {
   return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
 }
 
+// Content-sniffing: confirm the leading bytes actually match one of the
+// allowed raster image formats, so a non-image payload (HTML/SVG/script)
+// renamed to ".png" is rejected before it ever touches disk. This checks the
+// bytes are *an* allowed image, not that they match the specific extension —
+// a mismatched-but-valid double extension (card.png.jpg) is still caught by
+// the scan gate, and honouring the byte content here is the real defence.
+function looksLikeAllowedImage(bytes: Buffer): boolean {
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return true;
+  }
+  // JPEG: FF D8 FF
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return true;
+  }
+  // GIF: "GIF87a" / "GIF89a"
+  if (bytes.length >= 6 && bytes.subarray(0, 3).toString("latin1") === "GIF") {
+    return true;
+  }
+  // WEBP: "RIFF"...."WEBP"
+  if (
+    bytes.length >= 12 &&
+    bytes.subarray(0, 4).toString("latin1") === "RIFF" &&
+    bytes.subarray(8, 12).toString("latin1") === "WEBP"
+  ) {
+    return true;
+  }
+  return false;
+}
+
 interface UploadInput {
   ownerType: "asset" | "visualAsset";
   ownerId: string;
@@ -72,6 +112,9 @@ export async function uploadStoredFile(actor: Actor, input: UploadInput) {
     throw precondition(
       `File type ".${ext || "?"}" is not allowed (allowed: ${[...ALLOWED_IMAGE_EXTENSIONS].join(", ")})`,
     );
+  }
+  if (!looksLikeAllowedImage(input.data)) {
+    throw precondition("File content is not a recognised image (png, jpg, webp, or gif)");
   }
 
   const storage = getAssetStorage();

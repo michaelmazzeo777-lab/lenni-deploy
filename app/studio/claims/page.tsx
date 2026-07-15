@@ -1,4 +1,4 @@
-import { requireActor } from "@/lib/auth/context";
+import { requireStudioActor } from "@/lib/auth/guard";
 import { prisma } from "@/lib/db";
 import { can } from "@/lib/permissions";
 import { Banner, Badge } from "@/app/_ui";
@@ -12,7 +12,7 @@ export default async function ClaimsPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const actor = await requireActor();
+  const actor = await requireStudioActor();
   const { error } = await searchParams;
 
   const [claims, sources] = await Promise.all([
