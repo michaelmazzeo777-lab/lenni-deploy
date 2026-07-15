@@ -34,6 +34,7 @@ async function truncateAll() {
   // Row-level DELETE/UPDATE triggers do not fire on TRUNCATE, so this safely
   // resets even the append-only / immutable tables for a repeatable seed.
   const tables = [
+    "SignInThrottle",
     "AuditEvent",
     "VisualAsset",
     "VisualBrief",

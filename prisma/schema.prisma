@@ -967,6 +967,20 @@ model StoredFile {
   visualAsset VisualAsset? @relation(fields: [visualAssetId], references: [id])
 }
 
+// ---------- Sign-in throttling ----------
+
+// Fixed-window brute-force counters, keyed "email:<addr>" or "ip:<addr>".
+// Deliberately not workspace-scoped: throttling must apply before the
+// caller's identity is known (including for nonexistent accounts).
+model SignInThrottle {
+  id              String    @id @default(cuid())
+  key             String    @unique
+  failedCount     Int       @default(0)
+  windowStartedAt DateTime  @default(now())
+  lockedUntil     DateTime?
+  updatedAt       DateTime  @updatedAt
+}
+
 // ---------- Audit (append-only, enforced by trigger) ----------
 
 model AuditEvent {

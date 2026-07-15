@@ -109,6 +109,18 @@ item is disambiguated with a stable id suffix. Reason: `PublicArticleRevision` e
 creates an isolated workspace so files can share the DB. Playwright reseeds `fieldguide` in a
 global setup and runs against a production `next start` server.
 
+## Sign-in throttling: DB-backed fixed window, dual key
+
+**Decision:** Brute-force protection is a `SignInThrottle` table keyed per email
+(5 failures / 15 min) and per client IP (20 failures / 15 min, higher because IPs are
+shared), locking the key for 15 minutes. DB-backed (not in-memory) so it survives restarts
+and works across instances; checked before password verification and for nonexistent
+accounts identically, so lockout behavior does not reveal account existence. Success clears
+the email counter only — the IP window keeps counting so a rotating-password attack from one
+address still hits the IP ceiling. Lockouts on known accounts are audited (`auth.lockout`,
+actor SYSTEM). The IP comes from the first `x-forwarded-for` hop; spoofing it only weakens
+the IP ceiling, never the email ceiling.
+
 ## Local file storage: quarantine-first, image-only for MVP
 
 **Decision:** `AssetStorage` is a small provider-neutral interface (`lib/storage/types.ts`)
