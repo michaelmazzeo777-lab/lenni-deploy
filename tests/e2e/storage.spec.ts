@@ -46,7 +46,7 @@ test("local file storage: upload, quarantine, scan", async ({ page }) => {
   await expect(fileCell.getByText("PENDING")).toBeVisible();
   await expect(fileCell.getByText("card.png")).toBeVisible();
 
-  await fileCell.getByRole("button", { name: "Scan" }).click();
+  await fileCell.getByRole("button", { name: "Run mock scan" }).click();
   await expect(page).toHaveURL(/tab=assets/);
   await expect(
     page

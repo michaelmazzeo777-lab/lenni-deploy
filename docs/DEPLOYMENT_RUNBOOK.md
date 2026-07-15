@@ -32,6 +32,20 @@ procedure and the intended production shape. Public deployment is `APPROVAL_REQU
 - **Content:** revisions are immutable and append-only; to "unpublish", set the `Publication`
   status to `UNPUBLISHED` (removes it from public routes) rather than deleting revisions.
 
+## Data growth (plan before it matters)
+
+- **`AuditEvent` grows without bound by design** (append-only, delete-blocked by trigger).
+  At team scale this is years away from a problem; revisit when the table passes ~10 GB or
+  queries slow. The plan at that point is time-based partitioning or archival of old
+  partitions to cold storage via a reviewed migration — never row deletion, which the
+  trigger correctly refuses.
+- **`SignInThrottle`** rows are tiny and window-scoped; expired rows are harmless. An
+  occasional manual `DELETE FROM "SignInThrottle" WHERE "updatedAt" < now() - interval
+'7 days'` (or a future scheduled job) keeps it tidy. Seeding truncates it.
+- **`STORAGE_ROOT`** on-disk growth is bounded by the 10 MiB per-file limit and the
+  single-file-per-asset rule; failed `remove` calls are logged (`storage: failed to
+remove …`) so orphaned bytes are visible in logs.
+
 ## Health checks (MVP)
 
 - App responds on `/` (public) and redirects `/studio` → `/signin` when unauthenticated.

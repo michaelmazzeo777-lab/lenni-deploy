@@ -69,7 +69,10 @@ approval. No third-party auth is wired.
 optional `AnthropicAIProvider` loaded via dynamic import only when `ANTHROPIC_API_KEY` is set.
 Reason: the spec mandates mock-first, no client credentials, and that a missing key must not
 break demo/test mode. The Anthropic SDK is an _optional_ dependency (dynamic, non-literal
-import) so the app builds and tests run without it installed.
+import) so the app builds and tests run without it installed. The provider accepts an
+injectable client factory (defaulting to the SDK import) so its request/response handling
+and its flow into the validation pipeline are unit-tested against a recorded-shape fixture
+— the paid path is proven up to the network boundary without a key or spend.
 
 ## Storage: metadata-only placeholder
 

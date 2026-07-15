@@ -405,8 +405,13 @@ async function Assets({ actor, contentId }: { actor: Actor; contentId: string })
                             <input type="hidden" name="contentId" value={contentId} />
                             <input type="hidden" name="tab" value="assets" />
                             <input type="hidden" name="storedFileId" value={a.storedFile.id} />
-                            <button type="submit" className="secondary" style={{ marginTop: 4 }}>
-                              Scan
+                            <button
+                              type="submit"
+                              className="secondary"
+                              style={{ marginTop: 4 }}
+                              title="Deterministic mock check — not a real antivirus engine"
+                            >
+                              Run mock scan
                             </button>
                           </form>
                         ) : null}

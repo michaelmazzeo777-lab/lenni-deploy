@@ -18,7 +18,7 @@ All commands run from the repository root with a local PostgreSQL 16 instance.
 | Types                    | `pnpm typecheck`                         | PASS (`tsc --noEmit`, strict + noUncheckedIndexedAccess)                                                                                                                                                                         |
 | Migrations               | `prisma migrate deploy` (dev + test DBs) | PASS — 5 migrations (init incl. constraint SQL; packaging_experiment; distributed_production incl. AI-not-real-gameplay + leaked-capture CHECKs; local_file_storage incl. single-owner + scan-timestamp CHECKs; signin_throttle) |
 | Seed                     | `pnpm db:seed`                           | PASS (12 users incl. contributor roles, 12 content, 3 sources, 7 claims, 2 revisions, 63 audit events)                                                                                                                           |
-| Unit + integration tests | `pnpm test`                              | PASS — 70/70 (11 files)                                                                                                                                                                                                          |
+| Unit + integration tests | `pnpm test`                              | PASS — 74/74 (12 files)                                                                                                                                                                                                          |
 | Secret scan              | `pnpm test:secrets`                      | PASS — clean (all tracked + untracked files)                                                                                                                                                                                     |
 | Production build         | `pnpm build`                             | PASS — 27 routes, no DB required at build                                                                                                                                                                                        |
 | Browser e2e              | `pnpm test:e2e`                          | PASS — 6/6 (Chromium)                                                                                                                                                                                                            |
@@ -160,8 +160,9 @@ classification key, disclaimer) → record a correction → verify audit actions
 - Prompt-template admin and richer conflict-group views remain `PROPOSED` (data model + audit
   support exist).
 - `ContentBrief` and `ContentRelation` exist in the schema with limited dedicated UI.
-- Anthropic provider is implemented behind the interface but **not exercised** (no key; mock
-  is used). `APPROVAL_REQUIRED` before any real key/spend.
+- Anthropic provider: request/response handling and flow into the validation pipeline are
+  now **fixture-tested** (injectable client stub — no key, no network, no SDK). The live
+  API call itself remains unexercised; `APPROVAL_REQUIRED` before any real key/spend.
 
 ### Not done / out of scope
 

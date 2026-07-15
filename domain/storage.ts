@@ -133,7 +133,14 @@ export async function uploadStoredFile(actor: Actor, input: UploadInput) {
       );
     }
     if (existing) {
-      await storage.remove(existing.storagePath).catch(() => {});
+      // Removal failure is non-fatal (the record is gone either way) but must
+      // be visible — a silent failure leaks orphaned quarantine bytes on disk.
+      await storage.remove(existing.storagePath).catch((err: unknown) => {
+        console.warn(
+          `storage: failed to remove replaced quarantine file ${existing.storagePath}:`,
+          err,
+        );
+      });
       await tx.storedFile.delete({ where: { id: existing.id } });
     }
 
@@ -174,10 +181,11 @@ export async function uploadStoredFile(actor: Actor, input: UploadInput) {
   });
 }
 
-// Deterministic mock content scan. A real implementation would call an
-// external scanner; this one applies transparent, testable rules so the
-// quarantine gate is genuinely enforced rather than a no-op.
-function evaluateContent(bytes: Buffer, originalName: string): { clean: boolean; notes: string } {
+// Deterministic MOCK content gate — not a real antivirus engine (the UI says
+// so too). A real implementation would call an external scanner; this one
+// applies transparent, testable rules so the quarantine gate is genuinely
+// enforced rather than a no-op.
+function mockContentGate(bytes: Buffer, originalName: string): { clean: boolean; notes: string } {
   if (bytes.includes(Buffer.from(SIMULATED_MALICIOUS_MARKER))) {
     return { clean: false, notes: "Matched simulated-malware test marker" };
   }
@@ -185,7 +193,7 @@ function evaluateContent(bytes: Buffer, originalName: string): { clean: boolean;
   if (parts.length > 2) {
     return { clean: false, notes: "Double file extension is not allowed" };
   }
-  return { clean: true, notes: "No issues found by mock scanner" };
+  return { clean: true, notes: "Passed mock scan (deterministic check — not a real AV engine)" };
 }
 
 export async function scanStoredFile(actor: Actor, storedFileId: string) {
@@ -199,7 +207,7 @@ export async function scanStoredFile(actor: Actor, storedFileId: string) {
   }
 
   const bytes = await storage.read(stored.storagePath);
-  const result = evaluateContent(bytes, stored.originalName);
+  const result = mockContentGate(bytes, stored.originalName);
 
   return prisma.$transaction(async (tx) => {
     if (result.clean) {
@@ -272,7 +280,9 @@ export async function discardRejectedFile(actor: Actor, storedFileId: string) {
     throw forbidden("Only a rejected file may be discarded");
   }
   const storage = getAssetStorage();
-  await storage.remove(stored.storagePath).catch(() => {});
+  await storage.remove(stored.storagePath).catch((err: unknown) => {
+    console.warn(`storage: failed to remove rejected file ${stored.storagePath}:`, err);
+  });
   await prisma.storedFile.delete({ where: { id: storedFileId } });
   await writeAudit({
     workspaceId: actor.workspaceId,
