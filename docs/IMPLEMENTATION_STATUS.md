@@ -10,19 +10,19 @@ State labels: `REALITY` = inspected/ran; `PROPOSED` = not implemented; `OPEN` = 
 
 All commands run from the repository root with a local PostgreSQL 16 instance.
 
-| Check                    | Command                                  | Result                                                                                                                                                                                                                           |
-| ------------------------ | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Install                  | `pnpm install`                           | PASS                                                                                                                                                                                                                             |
-| Format                   | `pnpm format:check`                      | PASS (Prettier, all files)                                                                                                                                                                                                       |
-| Lint                     | `pnpm lint`                              | PASS (ESLint 9, next config)                                                                                                                                                                                                     |
-| Types                    | `pnpm typecheck`                         | PASS (`tsc --noEmit`, strict + noUncheckedIndexedAccess)                                                                                                                                                                         |
-| Migrations               | `prisma migrate deploy` (dev + test DBs) | PASS — 5 migrations (init incl. constraint SQL; packaging_experiment; distributed_production incl. AI-not-real-gameplay + leaked-capture CHECKs; local_file_storage incl. single-owner + scan-timestamp CHECKs; signin_throttle) |
-| Seed                     | `pnpm db:seed`                           | PASS (12 users incl. contributor roles, 12 content, 3 sources, 7 claims, 2 revisions, 63 audit events)                                                                                                                           |
-| Unit + integration tests | `pnpm test`                              | PASS — 74/74 (12 files)                                                                                                                                                                                                          |
-| Secret scan              | `pnpm test:secrets`                      | PASS — clean (all tracked + untracked files)                                                                                                                                                                                     |
-| Production build         | `pnpm build`                             | PASS — 27 routes, no DB required at build                                                                                                                                                                                        |
-| Browser e2e              | `pnpm test:e2e`                          | PASS — 6/6 (Chromium)                                                                                                                                                                                                            |
-| Full chain               | `pnpm verify`                            | PASS                                                                                                                                                                                                                             |
+| Check                    | Command                                  | Result                                                                                                                                                                                                                                                      |
+| ------------------------ | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Install                  | `pnpm install`                           | PASS                                                                                                                                                                                                                                                        |
+| Format                   | `pnpm format:check`                      | PASS (Prettier, all files)                                                                                                                                                                                                                                  |
+| Lint                     | `pnpm lint`                              | PASS (ESLint 9, next config)                                                                                                                                                                                                                                |
+| Types                    | `pnpm typecheck`                         | PASS (`tsc --noEmit`, strict + noUncheckedIndexedAccess)                                                                                                                                                                                                    |
+| Migrations               | `prisma migrate deploy` (dev + test DBs) | PASS — 6 migrations (init incl. constraint SQL; packaging_experiment; distributed_production incl. AI-not-real-gameplay + leaked-capture CHECKs; local_file_storage incl. single-owner + scan-timestamp CHECKs; signin_throttle; prompt_template_workspace) |
+| Seed                     | `pnpm db:seed`                           | PASS (12 users incl. contributor roles, 12 content, 3 sources, 7 claims, 2 revisions, 63 audit events)                                                                                                                                                      |
+| Unit + integration tests | `pnpm test`                              | PASS — 79/79 (13 files)                                                                                                                                                                                                                                     |
+| Secret scan              | `pnpm test:secrets`                      | PASS — clean (all tracked + untracked files)                                                                                                                                                                                                                |
+| Production build         | `pnpm build`                             | PASS — 28 routes, no DB required at build                                                                                                                                                                                                                   |
+| Browser e2e              | `pnpm test:e2e`                          | PASS — 7/7 (Chromium)                                                                                                                                                                                                                                       |
+| Full chain               | `pnpm verify`                            | PASS                                                                                                                                                                                                                                                        |
 
 Notes:
 
@@ -155,10 +155,22 @@ classification key, disclaimer) → record a correction → verify audit actions
   isolation, authorization boundaries, and `LocalAssetStorage` path-escape refusal) plus a
   browser e2e test driving a real file upload through the UI to a CLEAN scan result.
 
+### Prompt-template administration — REALITY
+
+- `/studio/admin/prompts` (Owner-only, `prompt.manage` capability): create append-only
+  template versions, deactivate/reactivate for rollback, audited
+  (`prompt.version_created` / `prompt.activated` / `prompt.deactivated`).
+- Templates are workspace-scoped (migration 6). Generation records the exact version used
+  in `AIGeneration.promptTemplateVersion` (0 = built-in code prompt).
+- Template text is appended AFTER the fixed safety rules and can never replace them
+  (unit-tested ordering in the Anthropic provider; the deterministic mock ignores it).
+- 4 integration tests (versioning + audit, RBAC refusal, active-version selection with
+  rollback to built-in, workspace isolation) and a browser e2e (owner creates v2,
+  rollback by deactivation, editor refused).
+
 ### Partial / simplified — PROPOSED to deepen further
 
-- Prompt-template admin and richer conflict-group views remain `PROPOSED` (data model + audit
-  support exist).
+- Richer conflict-group views remain `PROPOSED` (data model + audit support exist).
 - `ContentBrief` and `ContentRelation` exist in the schema with limited dedicated UI.
 - Anthropic provider: request/response handling and flow into the validation pipeline are
   now **fixture-tested** (injectable client stub — no key, no network, no SDK). The live

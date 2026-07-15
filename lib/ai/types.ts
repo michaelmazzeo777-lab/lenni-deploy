@@ -31,6 +31,9 @@ export interface AIExecutionContext {
   requestedByUserId: string;
   workingTitle: string;
   viewerPromise: string;
+  // Optional workspace prompt-template text. APPENDED after the fixed safety
+  // rules — it can add editorial guidance but never replaces the base rules.
+  systemExtension?: string;
 }
 
 export interface AIUsage {

@@ -7,6 +7,7 @@ import { createContent } from "@/domain/content";
 import { saveScriptVersion } from "@/domain/script";
 import { createAsset, reviewAsset } from "@/domain/rights";
 import { uploadStoredFile, scanStoredFile } from "@/domain/storage";
+import { createPromptTemplateVersion } from "@/domain/prompts";
 import { createTitleVariant, createThumbnailVariant } from "@/domain/packaging";
 import { createPackagingExperiment, concludePackagingExperiment } from "@/domain/experiments";
 import {
@@ -282,6 +283,16 @@ async function main() {
     data: titleCardBytes,
   });
   await scanStoredFile(owner, titleCardFile.id);
+
+  // One demo prompt-template version so the admin screen has content and
+  // generations record a real version. Guidance only — safety rules stay in code.
+  await createPromptTemplateVersion(owner, {
+    key: "content_packet",
+    systemText:
+      "Open with the direct answer to the viewer promise, then present evidence in " +
+      "classification order (CONFIRMED first). Prefer short declarative sentences. " +
+      "Name the classification inline whenever a claim is mentioned.",
+  });
 
   const titleA = await createTitleVariant(editor, {
     contentId: flagship.id,

@@ -39,7 +39,10 @@ export default async function StudioLayout({ children }: { children: React.React
 
         <h2>Administration</h2>
         {actor.roles.includes("OWNER") ? (
-          <Link href="/studio/admin/roles">Users &amp; roles</Link>
+          <>
+            <Link href="/studio/admin/roles">Users &amp; roles</Link>
+            <Link href="/studio/admin/prompts">Prompt templates</Link>
+          </>
         ) : null}
         <Link href="/studio/export/content?format=csv">Export content (CSV)</Link>
         <Link href="/studio/export/claims?format=csv">Export claims (CSV)</Link>

@@ -112,6 +112,23 @@ describe("AnthropicAIProvider (fixture — no key, no network)", () => {
     expect(args.messages[0]?.content).toContain("claim-1");
   });
 
+  it("appends a workspace template AFTER the fixed safety rules, never replacing them", async () => {
+    const capture: { lastArgs?: unknown } = {};
+    const provider = new AnthropicAIProvider("test-key-never-real", "configured-model-id", () =>
+      Promise.resolve(stubClient(packetCiting(["claim-1"]), capture)),
+    );
+    await provider.generateContentPacket({
+      ...CTX,
+      systemExtension: "Prefer short declarative sentences.",
+    });
+    const args = capture.lastArgs as { system: string };
+    const safetyIdx = args.system.indexOf("UNTRUSTED DATA");
+    const extensionIdx = args.system.indexOf("Prefer short declarative sentences.");
+    expect(safetyIdx).toBeGreaterThanOrEqual(0); // base rules present
+    expect(extensionIdx).toBeGreaterThan(safetyIdx); // extension strictly after
+    expect(args.system).toContain("does not override the rules above");
+  });
+
   it("feeds the same validation pipeline: well-grounded output is VALID", async () => {
     const provider = new AnthropicAIProvider("test-key-never-real", "configured-model-id", () =>
       Promise.resolve(stubClient(packetCiting(["claim-1"]))),

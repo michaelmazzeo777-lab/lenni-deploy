@@ -124,6 +124,18 @@ address still hits the IP ceiling. Lockouts on known accounts are audited (`auth
 actor SYSTEM). The IP comes from the first `x-forwarded-for` hop; spoofing it only weakens
 the IP ceiling, never the email ceiling.
 
+## Prompt templates: append-only versions, safety rules fixed in code
+
+**Decision:** `PromptTemplate` is workspace-scoped with append-only versioning — a change is
+always a new row (never edit/delete), so `AIGeneration.promptTemplateVersion` permanently
+points at exactly the text used; version 0 means the built-in code prompt. The template's
+`systemText` is **appended after** the fixed safety rules in `lib/ai/prompt.ts` (untrusted-data
+containment, no leaks, no affiliation, no legal claims) and can never replace them — an
+editable DB row must not be able to remove governance rules. Managing templates is an
+Owner-only capability (`prompt.manage`); creation/activation/deactivation are audited.
+Deactivating the newest version is the rollback path. The mock provider is deterministic and
+ignores template text; templates take effect with a real provider.
+
 ## Local file storage: quarantine-first, image-only for MVP
 
 **Decision:** `AssetStorage` is a small provider-neutral interface (`lib/storage/types.ts`)

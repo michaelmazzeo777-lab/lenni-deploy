@@ -37,6 +37,7 @@ export type Capability =
   | "handoff.export"
   | "storage.upload"
   | "storage.scan"
+  | "prompt.manage"
   | "audit.read";
 
 const MATRIX: Record<Capability, Role[]> = {
@@ -82,6 +83,8 @@ const MATRIX: Record<Capability, Role[]> = {
   "handoff.export": [Role.OWNER, Role.EDITOR, Role.PRODUCER],
   "storage.upload": [Role.OWNER, Role.EDITOR, Role.PRODUCER, Role.DESIGNER],
   "storage.scan": [Role.OWNER, Role.RIGHTS_REVIEWER],
+  // Prompt templates steer AI output; changing them is an Owner-only editorial control.
+  "prompt.manage": [Role.OWNER],
   "audit.read": [
     Role.OWNER,
     Role.EDITOR,

@@ -5,6 +5,7 @@ import { require_ } from "@/lib/permissions";
 import { precondition, notFound } from "@/lib/errors";
 import type { Actor } from "@/lib/auth/context";
 import { getAIProvider, isAIEnabled, validateContentPacket } from "@/lib/ai";
+import { activePromptTemplate } from "@/domain/prompts";
 import type { AIExecutionContext, AISourceRecord, AIClaimRecord } from "@/lib/ai/types";
 import { AIValidationStatus, AITaskType, AIReviewDecision } from "@prisma/client";
 
@@ -58,6 +59,11 @@ export async function generateContentPacket(actor: Actor, input: GeneratePacketI
     sourceIds: c.sources.map((cs) => cs.sourceId),
   }));
 
+  // Workspace prompt template (if one is active): its text extends the fixed
+  // safety rules, and the generation records the exact version used.
+  // Version 0 = built-in code prompt.
+  const template = await activePromptTemplate(actor.workspaceId, "content_packet");
+
   const ctx: AIExecutionContext = {
     taskType: "CONTENT_PACKET",
     contentId: content.id,
@@ -71,6 +77,7 @@ export async function generateContentPacket(actor: Actor, input: GeneratePacketI
     requestedByUserId: actor.userId,
     workingTitle: content.workingTitle,
     viewerPromise: content.viewerPromise ?? "",
+    systemExtension: template?.systemText,
   };
 
   const provider = getAIProvider();
@@ -101,7 +108,7 @@ export async function generateContentPacket(actor: Actor, input: GeneratePacketI
       provider: result.provider,
       model: result.model,
       promptTemplateKey: "content_packet",
-      promptTemplateVersion: 1,
+      promptTemplateVersion: template?.version ?? 0,
       inputHash,
       sourceIds: input.sourceIds,
       claimIds: input.claimIds,

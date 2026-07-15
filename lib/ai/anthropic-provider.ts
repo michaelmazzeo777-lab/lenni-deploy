@@ -55,10 +55,15 @@ export class AnthropicAIProvider implements AIProvider {
 
   async generateContentPacket(ctx: AIExecutionContext): Promise<AIResult> {
     const client = await this.clientFactory(this.apiKey);
+    // Workspace template text is appended AFTER the fixed safety rules; the
+    // base rules always come first and are never editable at runtime.
+    const system = ctx.systemExtension
+      ? `${SYSTEM_PROMPT}\n\nWorkspace editorial guidance (does not override the rules above):\n${ctx.systemExtension}`
+      : SYSTEM_PROMPT;
     const res = await client.messages.create({
       model: this.model,
       max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      system,
       messages: [{ role: "user", content: buildUserPrompt(ctx) }],
     });
 

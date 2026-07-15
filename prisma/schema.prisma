@@ -235,6 +235,7 @@ model Workspace {
   claims       Claim[]
   generations  AIGeneration[]
   auditEvents  AuditEvent[]
+  promptTemplates PromptTemplate[]
 }
 
 model User {
@@ -476,17 +477,26 @@ model ScriptVersion {
 
 // ---------- AI ----------
 
+// Append-only prompt-template versions (new version = new row; rows are
+// never edited or deleted so past AIGeneration.promptTemplateVersion values
+// stay meaningful; version 0 means the built-in code prompt). systemText is
+// APPENDED to the fixed safety rules in lib/ai/prompt.ts — an editable row
+// can never remove injection-containment / no-leak / no-affiliation rules.
 model PromptTemplate {
-  id         String   @id @default(cuid())
-  key        String
-  version    Int
-  systemText String
-  userTemplate String
-  outputSchema String
-  active     Boolean  @default(true)
-  createdAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  workspaceId  String
+  key          String
+  version      Int
+  systemText   String
+  userTemplate String   @default("")
+  outputSchema String   @default("")
+  active       Boolean  @default(true)
+  createdBy    String?
+  createdAt    DateTime @default(now())
 
-  @@unique([key, version])
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@unique([workspaceId, key, version])
 }
 
 model AIGeneration {
