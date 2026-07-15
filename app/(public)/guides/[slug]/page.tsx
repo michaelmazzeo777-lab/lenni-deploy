@@ -70,7 +70,9 @@ export default async function ArticlePage({ params }: { params: Promise<{ slug: 
     <article className="narrow">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        // JSON.stringify does not escape "</script>"; encode "<" so a title
+        // containing markup can never break out of this script element.
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
       />
       <div className="muted" style={{ fontSize: "0.8rem" }}>
         {humanStatus(article.pillar)}

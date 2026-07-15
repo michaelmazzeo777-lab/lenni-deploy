@@ -30,10 +30,13 @@ test("local file storage: upload, quarantine, scan", async ({ page }) => {
   await page.getByRole("button", { name: "Add asset" }).click();
   await expect(page.getByRole("cell", { name: "E2E title card" })).toBeVisible();
 
-  // Upload a tiny real PNG file via the file input.
+  // Upload a real PNG >1 MiB via the file input. The size matters: it proves
+  // the server-action bodySizeLimit override (next.config.ts) — with Next's
+  // 1 MB default this upload dies in the framework before our validation.
   const dir = mkdtempSync(path.join(tmpdir(), "fgs-upload-"));
   const filePath = path.join(dir, "card.png");
-  writeFileSync(filePath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]));
+  const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  writeFileSync(filePath, Buffer.concat([pngSignature, Buffer.alloc(2 * 1024 * 1024, 7)]));
   const row = page.getByRole("row", { name: /E2E title card/ });
   await row.locator('input[type="file"]').setInputFiles(filePath);
   await row.getByRole("button", { name: "Upload" }).click();

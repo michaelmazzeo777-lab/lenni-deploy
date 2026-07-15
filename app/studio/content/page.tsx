@@ -18,6 +18,7 @@ export default async function ContentListPage({
   const items = await prisma.contentItem.findMany({
     where: { workspaceId: actor.workspaceId, deletedAt: null },
     orderBy: [{ priority: "asc" }, { updatedAt: "desc" }],
+    take: 500, // bound the page; pagination becomes worthwhile well before this
   });
   const mayCreate = can(actor, "content.create");
 

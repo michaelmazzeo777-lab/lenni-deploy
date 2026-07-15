@@ -112,6 +112,34 @@ item is disambiguated with a stable id suffix. Reason: `PublicArticleRevision` e
 creates an isolated workspace so files can share the DB. Playwright reseeds `fieldguide` in a
 global setup and runs against a production `next start` server.
 
+## Adversarial-audit hardening (2026-07-15)
+
+Findings confirmed by direct code inspection and repaired the same day:
+
+1. **JSON-LD stored XSS** (`app/(public)/guides/[slug]/page.tsx`): `JSON.stringify` does not
+   escape `</script>`, so a published title containing markup could break out of the
+   structured-data script element. Fixed by encoding `<` as `<`.
+2. **Server-action body limit contradiction**: Next's 1 MB default killed 1–10 MiB uploads in
+   the framework before the app's documented 10 MiB validation ever ran. Fixed with
+   `serverActions.bodySizeLimit: "11mb"`; proven by the storage e2e now uploading a real 2 MB
+   file end-to-end.
+3. **Missing CSP / Permissions-Policy**: added a same-origin-locked Content-Security-Policy
+   (`'unsafe-inline'` only where Next's inline bootstrap and the app's inline styles require
+   it) and a deny-all Permissions-Policy. Headers verified live with curl; all e2e pass under
+   the CSP.
+4. **Unbounded content-list query**: bounded with `take: 500`.
+
+Verified clean in the same audit: session lifecycle (hashed 32-byte tokens, httpOnly/secure
+cookie, server-side expiry + sign-out invalidation, fresh token per sign-in), authorization
+coverage (41/41 studio server actions resolve the actor and delegate to RBAC- and
+workspace-checked domain services; the 2 unguarded actions are sign-in/out by design), raw
+SQL (only the seed truncate with a hardcoded list), markdown rendering (React-node renderer,
+all text escaped), public publish gating (central `PUBLISHED`-only reads; official-facts
+excludes LEAKED), storage path escapes (tested). Accepted, documented risks: throttle
+counter race can under-count by one under exact concurrency (fail-safe direction);
+prompt-version race fails safe via the unique constraint; `x-forwarded-for` spoofing
+weakens only the IP ceiling.
+
 ## Sign-in throttling: DB-backed fixed window, dual key
 
 **Decision:** Brute-force protection is a `SignInThrottle` table keyed per email
