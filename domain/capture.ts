@@ -51,6 +51,7 @@ const submitSchema = z.object({
   spoilerLevel: z.nativeEnum(SpoilerLevel).default("NONE"),
   fileReference: z.string().optional(),
   flagLeaked: z.boolean().default(false),
+  targetsShorts: z.boolean().default(false),
   supersedesId: z.string().optional(),
 });
 

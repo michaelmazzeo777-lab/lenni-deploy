@@ -38,6 +38,7 @@ export type Capability =
   | "storage.upload"
   | "storage.scan"
   | "prompt.manage"
+  | "shorts.publish"
   | "audit.read";
 
 const MATRIX: Record<Capability, Role[]> = {
@@ -85,6 +86,9 @@ const MATRIX: Record<Capability, Role[]> = {
   "storage.scan": [Role.OWNER, Role.RIGHTS_REVIEWER],
   // Prompt templates steer AI output; changing them is an Owner-only editorial control.
   "prompt.manage": [Role.OWNER],
+  // Publishing a Short to YouTube is an external action; Owner-only, mirroring
+  // publication.publish. (Generation/review reuse ai.generate / capture.review.)
+  "shorts.publish": [Role.OWNER],
   "audit.read": [
     Role.OWNER,
     Role.EDITOR,

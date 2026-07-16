@@ -157,6 +157,7 @@ export async function submitCaptureAction(fd: FormData) {
       modsNotes: opt(fd, "modsNotes"),
       fileReference: opt(fd, "fileReference"),
       flagLeaked: bool(fd, "flagLeaked"),
+      targetsShorts: bool(fd, "targetsShorts"),
       supersedesId: opt(fd, "supersedesId"),
     });
     revalidatePath(`/studio/content/${id}`);

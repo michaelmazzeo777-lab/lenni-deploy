@@ -846,6 +846,7 @@ model CaptureSession {
   spoilerLevel          SpoilerLevel  @default(NONE)
   fileReference         String?
   flagLeaked            Boolean       @default(false)
+  targetsShorts         Boolean       @default(false)
   status                CaptureStatus @default(SUBMITTED)
   reviewNotes           String?
   submittedBy           String
@@ -853,9 +854,10 @@ model CaptureSession {
   supersedesId          String?
   createdAt             DateTime      @default(now())
 
-  content    ContentItem @relation(fields: [contentId], references: [id])
-  assignment Assignment? @relation(fields: [assignmentId], references: [id])
-  shot       Shot?       @relation(fields: [shotId], references: [id])
+  content       ContentItem    @relation(fields: [contentId], references: [id])
+  assignment    Assignment?    @relation(fields: [assignmentId], references: [id])
+  shot          Shot?          @relation(fields: [shotId], references: [id])
+  shortsScripts ShortsScript[]
 }
 
 // ---------- Visual production ----------
@@ -1011,4 +1013,84 @@ model AuditEvent {
 
   @@index([entityType, entityId])
   @@index([workspaceId, createdAt])
+}
+
+// ---------- YouTube Shorts pipeline (mock-first; docs/YOUTUBE_SHORTS_PIPELINE_BLUEPRINT.md) ----------
+
+// A Short is generated FROM an approved, shorts-targeted CaptureSession —
+// never from unreviewed footage. Safety flags route to human review; they are
+// never silently auto-filtered.
+model ShortsScript {
+  id                 String             @id @default(cuid())
+  workspaceId        String
+  captureSessionId   String
+  provider           String // actual provider name, never assumed
+  model              String // actual configured model identifier
+  hookText           String
+  sectionsJson       Json // { text, timestampSec }[]
+  highlightsJson     Json // detected highlights, for editor reference
+  safetyFlagsJson    Json // any positive flag => QUARANTINED until human review
+  status             AIValidationStatus
+  createdBy          String
+  createdAt          DateTime           @default(now())
+
+  captureSession CaptureSession   @relation(fields: [captureSessionId], references: [id])
+  voiceover      ShortsVoiceover?
+  renders        ShortsRender[]
+}
+
+model ShortsVoiceover {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  scriptId       String   @unique
+  provider       String
+  voiceProfileId String
+  assetPath      String // written via AssetStorage under shorts/
+  durationSec    Float
+  duckingJson    Json // { timestampSec, gainDb }[]
+  createdBy      String
+  createdAt      DateTime @default(now())
+
+  script  ShortsScript   @relation(fields: [scriptId], references: [id])
+  renders ShortsRender[]
+}
+
+model ShortsRender {
+  id            String           @id @default(cuid())
+  workspaceId   String
+  scriptId      String
+  voiceoverId   String
+  storagePath   String
+  durationSec   Float
+  resolution    String // "1080x1920"
+  frameRate     Int // 30 by default (cost decision, see blueprint)
+  renderCostUsd Float            @default(0)
+  // Human quality gate: PENDING until an Owner/Editor approves (CLEAN) or
+  // rejects (REJECTED). Publish requires CLEAN.
+  status        QuarantineStatus @default(PENDING)
+  reviewNotes   String?
+  reviewedBy    String?
+  createdBy     String
+  createdAt     DateTime         @default(now())
+
+  script      ShortsScript        @relation(fields: [scriptId], references: [id])
+  voiceover   ShortsVoiceover     @relation(fields: [voiceoverId], references: [id])
+  publication YouTubePublication?
+}
+
+model YouTubePublication {
+  id              String            @id @default(cuid())
+  workspaceId     String
+  renderId        String            @unique
+  youtubeVideoId  String? // populated only after a real, successful publish call
+  title           String
+  description     String
+  tags            String[]
+  disclosureJson  Json // C2PA / altered-or-synthetic markers included in the payload
+  status          PublicationStatus @default(DRAFT)
+  publishedBy     String?
+  publishedAt     DateTime?
+  createdAt       DateTime          @default(now())
+
+  render ShortsRender @relation(fields: [renderId], references: [id])
 }

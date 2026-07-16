@@ -179,6 +179,7 @@ export async function ProductionTab({ actor, contentId }: { actor: Actor; conten
                   ["containsLicensedMusic", "Contains licensed music", false],
                   ["modsDeclared", "Mods/cheats used (declared)", false],
                   ["flagLeaked", "Leaked/prerelease material (auto-blocks)", false],
+                  ["targetsShorts", "Candidate for Shorts pipeline", false],
                 ].map(([name, label, checked]) => (
                   <label key={String(name)} style={{ display: "flex", gap: 8 }}>
                     <input

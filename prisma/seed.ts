@@ -36,6 +36,10 @@ async function truncateAll() {
   // resets even the append-only / immutable tables for a repeatable seed.
   const tables = [
     "SignInThrottle",
+    "YouTubePublication",
+    "ShortsRender",
+    "ShortsVoiceover",
+    "ShortsScript",
     "AuditEvent",
     "VisualAsset",
     "VisualBrief",

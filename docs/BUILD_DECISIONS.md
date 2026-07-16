@@ -112,6 +112,23 @@ item is disambiguated with a stable id suffix. Reason: `PublicArticleRevision` e
 creates an isolated workspace so files can share the DB. Playwright reseeds `fieldguide` in a
 global setup and runs against a production `next start` server.
 
+## Shorts pipeline: mock-first, human-gated, Mike-footage-only (2026-07-16)
+
+**Decision:** Implemented slice 1 of `docs/YOUTUBE_SHORTS_PIPELINE_BLUEPRINT.md` with Mike's
+explicit approval of the full build and his clarification that all footage is Mike/team-provided.
+Key choices: (a) footage intake **reuses** the existing `CaptureSession` review flow (new
+`targetsShorts` flag; leaked footage remains auto-BLOCKED) rather than any open public intake;
+(b) all four providers (script CV/LLM, TTS, video compositor, YouTube publisher) are
+deterministic mocks by default behind `lib/shorts/` seams — a non-mock selection without
+credentials **fails loudly** rather than silently falling back, and the mock publisher returns
+`mock-`-prefixed IDs that can never be mistaken for a real upload; (c) safety-flagged scripts
+are QUARANTINED for human review, never auto-passed or silently filtered; (d) renders land
+PENDING and require a human Approve/Reject (reusing `capture.review` authority) before publish;
+(e) publish is a new Owner-only capability `shorts.publish`, mirroring `publication.publish`,
+with synthetic-content disclosure flags always included in the payload; (f) 30fps default
+(cost decision, see blueprint §8). Real YouTube/TTS/render connections remain
+`APPROVAL_REQUIRED` + credentials-gated; nothing external is contacted today.
+
 ## Studio visual theme: neon-noir, Studio-only (2026-07-16)
 
 **Decision:** Applied a dark "neon-noir" theme (teal/cyan + magenta on near-black, `.studio-theme`
