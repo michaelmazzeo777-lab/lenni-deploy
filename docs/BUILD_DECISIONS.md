@@ -112,6 +112,29 @@ item is disambiguated with a stable id suffix. Reason: `PublicArticleRevision` e
 creates an isolated workspace so files can share the DB. Playwright reseeds `fieldguide` in a
 global setup and runs against a production `next start` server.
 
+## Studio visual theme: neon-noir, Studio-only (2026-07-16)
+
+**Decision:** Applied a dark "neon-noir" theme (teal/cyan + magenta on near-black, `.studio-theme`
+in `app/globals.css`) to the private Studio tool only — public site and sign-in page are
+byte-for-byte unaffected (they never receive the class). Mike's explicit direction. Palette is
+the 1980s Miami neon-noir genre style, a public-domain aesthetic (Miami Vice predates and is
+unrelated to Rockstar's IP) — deliberately **not** any imitation of Rockstar/Take-Two's actual
+GTA VI marketing type, logo, or trade dress, which CLAUDE.md prohibits. Competitor research
+(GTA fan-channel thumbnails using the official "VI" logo and photorealistic character crops)
+was reviewed and explicitly rejected as a direction for exactly that reason.
+
+Button fills use dark saturated tones (cyan-800/fuchsia-800) rather than the brighter neon
+tones, so white button text keeps strong contrast (measured 7.27:1 and 8.24:1, both exceeding
+even the AAA 7:1 threshold); the brighter cyan/magenta values are used only for glows, borders,
+links, and the gradient-text brand wordmark against the dark background, which independently
+measure 10.68:1 and 7.29:1. All values measured with the WCAG relative-luminance formula, not
+assumed. The Studio now ships one fixed dark theme regardless of the visitor's OS light/dark
+preference (declared directly on the `.shell` element, which overrides inherited `:root`
+tokens) — the same choice most professional creative tools make (Figma, Linear, code editors);
+the public site is unaffected and continues to respect the visitor's preference as before.
+Token-only CSS change; no new dependencies; verified with the full test suite (unchanged) plus
+the full e2e suite (unchanged) plus manual before/after screenshots.
+
 ## Adversarial-audit hardening (2026-07-15)
 
 Findings confirmed by direct code inspection and repaired the same day:

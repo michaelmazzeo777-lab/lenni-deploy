@@ -348,3 +348,81 @@ th {
     transition: none !important;
   }
 }
+
+/* ---------- Studio theme: high-tech neon-noir (private tool only) ----------
+   Applied via .studio-theme on the shell root (app/studio/layout.tsx) — the
+   public site never receives this class, so it is unaffected. Palette is the
+   1980s Miami neon-noir genre style (teal/cyan + magenta on near-black), which
+   is a public-domain design aesthetic predating and unrelated to Rockstar's
+   GTA VI marketing type/trade dress; it must never be confused with or drift
+   toward imitating Rockstar/Take-Two's actual branding (see CLAUDE.md
+   Independence). A declaration directly on .shell overrides the inherited
+   :root tokens regardless of the visitor's OS light/dark preference — the
+   Studio intentionally ships one fixed dark theme, like most professional
+   creative tools (Figma, Linear, code editors), while the public site keeps
+   respecting the visitor's light/dark preference as before.
+
+   Button fills use darker saturated tones so white button text keeps AA
+   contrast; the brighter neon tones are reserved for glows, borders, links,
+   and the brand wordmark, where they sit against the dark card/background
+   (also AA-safe) rather than behind white text. */
+.studio-theme {
+  --bg: #0a0e17;
+  --bg-elev: #10151f;
+  --bg-card: #141a26;
+  --border: #232c3d;
+  --text: #e8f4f8;
+  --text-dim: #8fb0bf;
+  --accent: #22d3ee;
+  --accent-strong: #155e75;
+  --accent-2: #f472b6;
+  --accent-2-strong: #86198f;
+}
+
+.studio-theme .brand {
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.studio-theme .card {
+  background: linear-gradient(175deg, var(--bg-card), var(--bg-elev));
+}
+
+.studio-theme button:not(.secondary),
+.studio-theme .btn:not(.secondary) {
+  background: linear-gradient(90deg, var(--accent-strong), var(--accent-2-strong));
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.35),
+    0 0 14px rgba(34, 211, 238, 0.2);
+}
+.studio-theme button:not(.secondary):hover,
+.studio-theme .btn:not(.secondary):hover {
+  box-shadow:
+    0 0 0 1px rgba(244, 114, 182, 0.45),
+    0 0 18px rgba(244, 114, 182, 0.3);
+}
+
+.studio-theme .sidebar {
+  border-right-color: var(--border);
+  position: relative;
+}
+.studio-theme .sidebar::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+.studio-theme .sidebar a {
+  border-left: 2px solid transparent;
+}
+.studio-theme .sidebar a:hover {
+  border-left-color: var(--accent);
+  background: var(--bg-card);
+}
+
+.studio-theme .tabs a.active {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}

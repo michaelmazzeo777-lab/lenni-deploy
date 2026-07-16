@@ -8,7 +8,7 @@ export default async function StudioLayout({ children }: { children: React.React
   if (!actor) redirect("/signin");
 
   return (
-    <div className="shell">
+    <div className="shell studio-theme">
       <nav className="sidebar" aria-label="Studio navigation">
         <div className="brand">Field Guide Studio</div>
         <p className="muted" style={{ fontSize: "0.78rem" }}>
