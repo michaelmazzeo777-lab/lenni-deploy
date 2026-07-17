@@ -70,8 +70,8 @@ describe("Shorts pipeline (mock providers, end to end)", () => {
     await expect(
       publishShort(owner, {
         renderId: render.id,
-        title: "T",
-        description: "D",
+        title: "Valid title",
+        description: "Valid description",
         tags: [],
       }),
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
@@ -176,11 +176,72 @@ describe("Shorts pipeline (mock providers, end to end)", () => {
     });
     await reviewRender(editor, render.id, "APPROVED");
     await expect(
-      publishShort(researcher, { renderId: render.id, title: "T", description: "D", tags: [] }),
+      publishShort(researcher, {
+        renderId: render.id,
+        title: "Test title",
+        description: "Test description",
+        tags: [],
+      }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(
-      publishShort(editor, { renderId: render.id, title: "T", description: "D", tags: [] }),
+      publishShort(editor, {
+        renderId: render.id,
+        title: "Test title",
+        description: "Test description",
+        tags: [],
+      }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" }); // Owner-only, like publication.publish
+  });
+
+  it("validates publish metadata against YouTube limits (title <= 100 chars)", async () => {
+    const capture = await approvedShortsCapture("clip-limits.mp4");
+    const script = await draftShortsScript(owner, capture.id);
+    const voiceover = await synthesizeVoiceover(owner, script.id, "default");
+    const render = await renderShort(owner, voiceover.id, "Leonida Field Guide");
+    await reviewRender(editor, render.id, "APPROVED");
+    await expect(
+      publishShort(owner, {
+        renderId: render.id,
+        title: "x".repeat(101),
+        description: "Valid description",
+        tags: [],
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("publish claim blocks a second concurrent attempt; rejection purges render bytes", async () => {
+    const capture = await approvedShortsCapture("clip-claim.mp4");
+    const script = await draftShortsScript(owner, capture.id);
+    const voiceover = await synthesizeVoiceover(owner, script.id, "default");
+
+    // Rejected render: bytes are purged from storage, record kept.
+    const rejected = await renderShort(owner, voiceover.id, "Leonida Field Guide");
+    await reviewRender(editor, rejected.id, "REJECTED", "Framing is off");
+    const storage = new LocalAssetStorage(process.env.STORAGE_ROOT);
+    await expect(storage.read(rejected.storagePath)).rejects.toThrow();
+    const kept = await prisma.shortsRender.findUnique({ where: { id: rejected.id } });
+    expect(kept?.status).toBe("REJECTED"); // audit-trail record survives
+
+    // Regenerate after rejection is allowed.
+    const render = await renderShort(owner, voiceover.id, "Leonida Field Guide");
+    await reviewRender(editor, render.id, "APPROVED");
+
+    // A pre-existing DRAFT claim (simulating a concurrent in-flight publish)
+    // blocks a second attempt BEFORE any external call could happen.
+    await prisma.youTubePublication.create({
+      data: {
+        workspaceId: owner.workspaceId,
+        renderId: render.id,
+        title: "In-flight",
+        description: "Simulated concurrent claim",
+        tags: [],
+        disclosureJson: { alteredOrSynthetic: true },
+        status: "DRAFT",
+      },
+    });
+    await expect(
+      publishShort(owner, { renderId: render.id, title: "Title", description: "Desc", tags: [] }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
   it("a non-mock provider selection without credentials fails loudly, never silently", async () => {
@@ -193,7 +254,12 @@ describe("Shorts pipeline (mock providers, end to end)", () => {
       const render = await renderShort(owner, voiceover.id, "Leonida Field Guide");
       await reviewRender(editor, render.id, "APPROVED");
       await expect(
-        publishShort(owner, { renderId: render.id, title: "T", description: "D", tags: [] }),
+        publishShort(owner, {
+          renderId: render.id,
+          title: "Test title",
+          description: "Test description",
+          tags: [],
+        }),
       ).rejects.toThrow(/not available/);
       // Nothing was recorded as published.
       const pub = await prisma.youTubePublication.findUnique({ where: { renderId: render.id } });

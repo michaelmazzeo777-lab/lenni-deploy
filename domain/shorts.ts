@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { require_ } from "@/lib/permissions";
@@ -93,6 +94,9 @@ export async function synthesizeVoiceover(actor: Actor, scriptId: string, voiceP
       "Voiceover requires a VALID script (quarantined/failed scripts are blocked)",
     );
   }
+  // The @unique(scriptId) constraint is the real duplicate guard (this
+  // pre-check just gives a friendlier message; a concurrent duplicate is
+  // converted from a raw P2002 below).
   const existing = await prisma.shortsVoiceover.findUnique({ where: { scriptId } });
   if (existing) throw precondition("A voiceover already exists for this script");
 
@@ -106,18 +110,26 @@ export async function synthesizeVoiceover(actor: Actor, scriptId: string, voiceP
   const assetPath = `shorts/voiceover/${scriptId}.wav`;
   await storage.write(assetPath, result.audioBytes);
 
-  const voiceover = await prisma.shortsVoiceover.create({
-    data: {
-      workspaceId: actor.workspaceId,
-      scriptId,
-      provider: provider.name,
-      voiceProfileId,
-      assetPath,
-      durationSec: result.durationSec,
-      duckingJson: result.duckingCurve as unknown as object,
-      createdBy: actor.userId,
-    },
-  });
+  const voiceover = await prisma.shortsVoiceover
+    .create({
+      data: {
+        workspaceId: actor.workspaceId,
+        scriptId,
+        provider: provider.name,
+        voiceProfileId,
+        assetPath,
+        durationSec: result.durationSec,
+        duckingJson: result.duckingCurve as unknown as object,
+        createdBy: actor.userId,
+      },
+    })
+    .catch((e: unknown) => {
+      // Concurrent duplicate lost the unique(scriptId) race.
+      if (typeof e === "object" && e !== null && (e as { code?: string }).code === "P2002") {
+        throw precondition("A voiceover already exists for this script");
+      }
+      throw e;
+    });
   await writeAudit({
     workspaceId: actor.workspaceId,
     actorId: actor.userId,
@@ -191,14 +203,29 @@ export async function reviewRender(
     throw precondition("A rejection needs a recorded reason");
   }
 
-  const updated = await prisma.shortsRender.update({
-    where: { id: renderId },
+  // Atomic status guard: the WHERE includes PENDING so two concurrent
+  // reviewers cannot both win — the loser matches zero rows.
+  const { count } = await prisma.shortsRender.updateMany({
+    where: { id: renderId, status: QuarantineStatus.PENDING },
     data: {
       status: decision === "APPROVED" ? QuarantineStatus.CLEAN : QuarantineStatus.REJECTED,
       reviewNotes: notes ?? null,
       reviewedBy: actor.userId,
     },
   });
+  if (count === 0) throw precondition("This render was already reviewed");
+  const updated = await prisma.shortsRender.findUniqueOrThrow({ where: { id: renderId } });
+
+  // Reject & purge (blueprint Module 5): a rejected render's bytes are
+  // removed from storage (the DB record stays for the audit trail). Failure
+  // is non-fatal but must be visible — silent failure leaks disk.
+  if (decision === "REJECTED") {
+    await getAssetStorage()
+      .remove(render.storagePath)
+      .catch((err: unknown) => {
+        console.warn(`shorts: failed to remove rejected render ${render.storagePath}:`, err);
+      });
+  }
   await writeAudit({
     workspaceId: actor.workspaceId,
     actorId: actor.userId,
@@ -210,15 +237,25 @@ export async function reviewRender(
   return updated;
 }
 
-export interface PublishShortInput {
-  renderId: string;
-  title: string;
-  description: string;
-  tags: string[];
-}
+// YouTube Data API metadata limits (title 100 chars, description 5000 bytes,
+// tags 500 chars total) validated up front so a real provider can never be
+// called with a payload the platform would reject.
+const publishSchema = z.object({
+  renderId: z.string().min(1),
+  title: z.string().trim().min(3).max(100),
+  description: z.string().trim().min(3).max(5000),
+  tags: z
+    .array(z.string().trim().min(1).max(100))
+    .max(30)
+    .default([])
+    .refine((tags) => tags.join(",").length <= 500, "Tags exceed 500 characters total"),
+});
 
-export async function publishShort(actor: Actor, input: PublishShortInput) {
+export type PublishShortInput = z.input<typeof publishSchema>;
+
+export async function publishShort(actor: Actor, raw: PublishShortInput) {
   require_(actor, "shorts.publish");
+  const input = publishSchema.parse(raw);
   const render = await prisma.shortsRender.findUnique({
     where: { id: input.renderId },
     include: { script: true, publication: true },
@@ -227,46 +264,65 @@ export async function publishShort(actor: Actor, input: PublishShortInput) {
   if (render.status !== "CLEAN") {
     throw precondition("Only a human-approved (CLEAN) render may be published");
   }
-  if (render.publication?.status === "PUBLISHED") {
-    throw precondition("This render is already published");
-  }
-  if (!input.title.trim() || !input.description.trim()) {
-    throw precondition("Title and description are required");
+  if (render.publication) {
+    throw precondition(
+      render.publication.status === "PUBLISHED"
+        ? "This render is already published"
+        : "A publish attempt for this render is already in progress",
+    );
   }
 
   // Synthetic-content disclosure is always sent — the voiceover is synthesized
   // and the composition is automated (blueprint compliance requirement).
   const disclosureFlags = { alteredOrSynthetic: true, syntheticVoiceover: true };
 
+  // Resolve the publisher BEFORE creating the claim: a configuration error
+  // (non-mock provider without credentials) must fail without touching the DB.
   const publisher = getYouTubePublisher();
-  const result = await publisher.publish({
-    videoAssetPath: render.storagePath,
-    title: input.title,
-    description: input.description,
-    tags: input.tags,
-    disclosureFlags,
-  });
 
-  const publication = await prisma.youTubePublication.upsert({
-    where: { renderId: input.renderId },
-    create: {
-      workspaceId: actor.workspaceId,
-      renderId: input.renderId,
-      youtubeVideoId: result.youtubeVideoId,
+  // Idempotency claim BEFORE the external call: the unique(renderId) DRAFT row
+  // is the lock. Two concurrent publishes race on this create; the loser gets
+  // P2002 and no second external upload can ever happen. On external failure
+  // the claim is released so a retry is possible.
+  const claim = await prisma.youTubePublication
+    .create({
+      data: {
+        workspaceId: actor.workspaceId,
+        renderId: input.renderId,
+        title: input.title,
+        description: input.description,
+        tags: input.tags,
+        disclosureJson: disclosureFlags,
+        status: PublicationStatus.DRAFT,
+      },
+    })
+    .catch((e: unknown) => {
+      if (typeof e === "object" && e !== null && (e as { code?: string }).code === "P2002") {
+        throw precondition("A publish attempt for this render is already in progress");
+      }
+      throw e;
+    });
+
+  let result: { youtubeVideoId: string };
+  try {
+    result = await publisher.publish({
+      videoAssetPath: render.storagePath,
       title: input.title,
       description: input.description,
       tags: input.tags,
-      disclosureJson: disclosureFlags,
-      status: PublicationStatus.PUBLISHED,
-      publishedBy: actor.userId,
-      publishedAt: new Date(),
-    },
-    update: {
+      disclosureFlags,
+    });
+  } catch (e) {
+    await prisma.youTubePublication.delete({ where: { id: claim.id } }).catch(() => {
+      console.warn(`shorts: failed to release publish claim ${claim.id}`);
+    });
+    throw e;
+  }
+
+  const publication = await prisma.youTubePublication.update({
+    where: { id: claim.id },
+    data: {
       youtubeVideoId: result.youtubeVideoId,
-      title: input.title,
-      description: input.description,
-      tags: input.tags,
-      disclosureJson: disclosureFlags,
       status: PublicationStatus.PUBLISHED,
       publishedBy: actor.userId,
       publishedAt: new Date(),

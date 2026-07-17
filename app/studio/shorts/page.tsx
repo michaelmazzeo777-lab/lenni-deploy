@@ -129,17 +129,20 @@ export default async function ShortsPage({
           ) : null}
 
           {script.voiceover ? (
-            <p className="muted" style={{ fontSize: "0.82rem" }}>
+            <div className="muted" style={{ fontSize: "0.82rem" }}>
               Voiceover: {script.voiceover.assetPath} ({script.voiceover.durationSec}s)
-              {mayGenerate && script.renders.length === 0 ? (
+              {/* Re-rendering is allowed when every previous render was
+                  rejected (the regenerate path); hidden only while a render
+                  is pending review or already approved. */}
+              {mayGenerate && !script.renders.some((r) => r.status !== "REJECTED") ? (
                 <form action={renderShortAction} style={{ display: "inline", marginLeft: 8 }}>
                   <input type="hidden" name="voiceoverId" value={script.voiceover.id} />
                   <button type="submit" className="secondary">
-                    Render (mock)
+                    {script.renders.length > 0 ? "Re-render (mock)" : "Render (mock)"}
                   </button>
                 </form>
               ) : null}
-            </p>
+            </div>
           ) : null}
 
           {script.renders.map((r) => (

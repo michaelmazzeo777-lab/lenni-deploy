@@ -1,11 +1,16 @@
 # YouTube Shorts Pipeline — Full Build Blueprint
 
-**Status:** Draft — Full specification, not yet implemented. `BLOCKED` on Mike supplying real
-credentials (see "What Mike needs to provide" below); no external account created, no code
-written, no secret stored. This blueprint supersedes the earlier comparison document's module
-descriptions where they differ, based on Mike's clarification: **all source footage is
-Mike/team-provided — there is no anonymous public-submission intake.** That single fact changes
-the rights-risk profile substantially: this is now an extension of the existing
+**Status:** IMPLEMENTED in mock mode (slice 1) — see `docs/BUILD_DECISIONS.md` "Shorts
+pipeline" and `docs/IMPLEMENTATION_STATUS.md` for the shipped state (migration 7,
+`lib/shorts/`, `domain/shorts.ts`, `/studio/shorts`, integration + e2e tests). Real external
+connections remain `BLOCKED` on Mike supplying credentials (see "What Mike needs to provide"
+below); no external account created, no secret stored. Where the shipped code differs from
+this document (e.g. the human render-review gate uses `capture.review` authority instead of a
+new `YOUTUBE_SHORTS` approval scope; storage paths are written directly under `shorts/` rather
+than through the StoredFile quarantine table), the code and `BUILD_DECISIONS.md` are
+authoritative — this document is kept as the original design record. Mike's rights
+clarification stands: **all source footage is Mike/team-provided — there is no anonymous
+public-submission intake**, which makes this an extension of the existing
 Contributor/CaptureSession system, not a new legal exposure.
 
 ## 1. Scope statement
