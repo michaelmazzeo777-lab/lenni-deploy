@@ -125,10 +125,16 @@ export async function transition(
       if (guard) await guard(contentId, tx);
     }
 
-    const updated = await tx.contentItem.update({
-      where: { id: contentId },
+    // Guarded write: only applies if the status is still what we read above,
+    // so two concurrent transitions from the same status cannot both win.
+    const { count } = await tx.contentItem.updateMany({
+      where: { id: contentId, status: from },
       data: { status: to },
     });
+    if (count === 0) {
+      throw precondition("Content status changed concurrently; reload and retry");
+    }
+    const updated = await item(contentId, tx);
 
     await tx.contentStatusHistory.create({
       data: {

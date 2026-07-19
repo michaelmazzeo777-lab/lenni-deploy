@@ -217,3 +217,22 @@ quarantine gate so an unreviewed or rejected upload can never silently become an
 asset's location. Scope is deliberately narrowed to image files (png/jpg/jpeg/webp/gif, ≤10 MiB)
 for this slice — gameplay capture video remains a `fileReference` string (external storage),
 since browser-uploading multi-gigabyte footage through this app is out of scope for the MVP.
+
+## Workflow transition race fix + ownership-check finding closed (2026-07-19)
+
+**Race repaired.** `transition()` in `domain/workflow.ts` read the current status and then
+wrote the new one unconditionally, so two concurrent transitions from the same status could
+both succeed and record duplicate `ContentStatusHistory` rows. The write is now a guarded
+`updateMany` on `{ id, status: from }`; if no row matches (the status changed after we read
+it), the transaction throws `PRECONDITION_FAILED` ("Content status changed concurrently;
+reload and retry") and rolls back. Proven by
+`tests/integration/workflow-race.test.ts`, which stages the interleaving with a held
+`FOR UPDATE` row lock: on the old code both concurrent calls won (two history rows); on the
+new code exactly one wins, the loser gets the precondition error, and exactly one
+`IDEA → TRIAGE` history row exists.
+
+**Finding closed (disproven).** An earlier audit note claimed corrections and publication
+carried zero workspace ownership checks. Direct inspection shows both do:
+`domain/correction.ts:28` and `domain/publication.ts:99` each fetch the content item and
+throw `notFound` unless `content.workspaceId === actor.workspaceId` before doing any work.
+The finding is closed as not reproducible against current code.
