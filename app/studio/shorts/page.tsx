@@ -112,33 +112,48 @@ export default async function ShortsPage({
                   <td className="muted">{c.shortsScripts.length}</td>
                   <td>
                     {mayGenerate && scriptP !== "mock" ? (
-                      c.highlights.length === 0 ? (
+                      // A cut that already has a script is not offered again.
+                      c.highlights.filter(
+                        (h) => !c.shortsScripts.some((sc) => sc.highlightCandidateId === h.id),
+                      ).length === 0 ? (
+                        c.highlights.length > 0 ? (
+                          <span className="muted">All approved cuts are scripted.</span>
+                        ) : (
+                          <span className="muted">
+                            Approve a highlight cut in Capture intake first.
+                          </span>
+                        )
+                      ) : c.highlights.length === 0 ? (
                         <span className="muted">
                           Approve a highlight cut in Capture intake first.
                         </span>
                       ) : (
-                        c.highlights.map((h) => (
-                          <details key={h.id}>
-                            <summary>
-                              Write script for cut {h.rank} (
-                              {(h.trimStartSec ?? h.startSec).toFixed(0)}
-                              s–{(h.trimEndSec ?? h.endSec).toFixed(0)}s)
-                            </summary>
-                            <form action={draftShortsScriptAction}>
-                              <input type="hidden" name="captureSessionId" value={c.id} />
-                              <input type="hidden" name="highlightCandidateId" value={h.id} />
-                              <label htmlFor={`hook-${h.id}`}>Hook</label>
-                              <input id={`hook-${h.id}`} name="hookText" required />
-                              <label htmlFor={`lines-${h.id}`}>Script lines (one per line)</label>
-                              <textarea id={`lines-${h.id}`} name="lines" rows={3} required />
-                              <div style={{ marginTop: 8 }}>
-                                <button type="submit" className="secondary">
-                                  Save script ({scriptP})
-                                </button>
-                              </div>
-                            </form>
-                          </details>
-                        ))
+                        c.highlights
+                          .filter(
+                            (h) => !c.shortsScripts.some((sc) => sc.highlightCandidateId === h.id),
+                          )
+                          .map((h) => (
+                            <details key={h.id}>
+                              <summary>
+                                Write script for cut {h.rank} (
+                                {(h.trimStartSec ?? h.startSec).toFixed(0)}
+                                s–{(h.trimEndSec ?? h.endSec).toFixed(0)}s)
+                              </summary>
+                              <form action={draftShortsScriptAction}>
+                                <input type="hidden" name="captureSessionId" value={c.id} />
+                                <input type="hidden" name="highlightCandidateId" value={h.id} />
+                                <label htmlFor={`hook-${h.id}`}>Hook</label>
+                                <input id={`hook-${h.id}`} name="hookText" required />
+                                <label htmlFor={`lines-${h.id}`}>Script lines (one per line)</label>
+                                <textarea id={`lines-${h.id}`} name="lines" rows={3} required />
+                                <div style={{ marginTop: 8 }}>
+                                  <button type="submit" className="secondary">
+                                    Save script ({scriptP})
+                                  </button>
+                                </div>
+                              </form>
+                            </details>
+                          ))
                       )
                     ) : mayGenerate ? (
                       <form action={draftShortsScriptAction}>

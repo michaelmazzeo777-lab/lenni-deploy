@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { can } from "@/lib/permissions";
 import { Banner, Badge } from "@/app/_ui";
 import { createClaimAction, reviewClaimAction } from "@/app/studio/actions";
+import { toCanonicalRecord } from "@/domain/canonicalTaxonomy";
 
 export const metadata = { title: "Claims — Field Guide Studio" };
 export const dynamic = "force-dynamic";
@@ -43,35 +44,49 @@ export default async function ClaimsPage({
               <tr>
                 <th>Statement</th>
                 <th>Class</th>
+                <th>Canonical (v1.3)</th>
                 <th>Status</th>
                 <th>Sources</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {claims.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.statement}</td>
-                  <td>
-                    <Badge kind={c.classification} />
-                  </td>
-                  <td>{c.status}</td>
-                  <td className="muted">
-                    {c.sources.map((cs) => cs.source.publisher).join(", ") || "—"}
-                  </td>
-                  <td>
-                    {mayReview && c.status === "PROPOSED" ? (
-                      <form action={reviewClaimAction}>
-                        <input type="hidden" name="claimId" value={c.id} />
-                        <input type="hidden" name="back" value="/studio/claims" />
-                        <button type="submit" className="secondary">
-                          Mark reviewed
-                        </button>
-                      </form>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
+              {claims.map((c) => {
+                // Read-only mapping to the canonical evidence classes; the
+                // stored legacy class is never rewritten.
+                const m = toCanonicalRecord(c);
+                return (
+                  <tr key={c.id}>
+                    <td>{c.statement}</td>
+                    <td>
+                      <Badge kind={c.classification} />
+                    </td>
+                    <td style={{ fontSize: "0.78rem" }}>
+                      {m.canonical ?? "QUARANTINED"}
+                      {m.needsReview ? (
+                        <div className="muted" title={m.reasons.join("; ")}>
+                          needs review: {m.reasons.join("; ")}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>{c.status}</td>
+                    <td className="muted">
+                      {c.sources.map((cs) => cs.source.publisher).join(", ") || "—"}
+                    </td>
+                    <td>
+                      {mayReview && c.status === "PROPOSED" ? (
+                        <form action={reviewClaimAction}>
+                          <input type="hidden" name="claimId" value={c.id} />
+                          <input type="hidden" name="back" value="/studio/claims" />
+                          <button type="submit" className="secondary">
+                            Mark reviewed
+                          </button>
+                        </form>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
               {claims.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="muted">

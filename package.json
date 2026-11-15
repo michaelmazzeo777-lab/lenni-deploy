@@ -25,6 +25,7 @@
     "db:reset": "prisma migrate reset --force --skip-seed",
     "db:seed": "tsx prisma/seed.ts",
     "db:local": "sh scripts/dev-db.sh",
+    "pilot:queue": "tsx prisma/seed-pilot-v1_3.ts",
     "fixtures": "tsx scripts/make-fixtures.ts",
     "benchmark:highlights": "tsx scripts/highlight-benchmark.ts",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:secrets && pnpm build"

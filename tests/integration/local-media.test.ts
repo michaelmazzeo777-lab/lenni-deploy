@@ -18,6 +18,8 @@ import {
 } from "@/domain/shorts";
 import { LocalAssetStorage } from "@/lib/storage/local-provider";
 import { meanVolumeDb, probeVideo } from "@/lib/media/ffmpeg";
+import { createSource, createClaim, linkClaimToContent } from "@/domain/evidence";
+import { markSourceStale } from "@/domain/updates";
 
 // Real local pipeline, end to end, on synthetic fixtures: ingest -> highlight
 // analysis -> approve/trim -> operator script -> narration -> real MP4 render.
@@ -237,6 +239,27 @@ describe("real local render", () => {
       where: { captureSessionId: captureId },
       data: { rightsStatus: "INTERNAL_FIXTURE" },
     });
+
+    // Stale-fact gate: a linked claim whose source went stale blocks production
+    // until the source is refreshed.
+    const source = await createSource(owner, {
+      title: "Official page (test)",
+      publisher: "Rockstar Games",
+      sourceClass: "OFFICIAL_SOURCE",
+      sourceType: "official-page",
+    });
+    const fact = await createClaim(owner, {
+      statement: "Preload begins on a date that later changed.",
+      classification: "CONFIRMED",
+      sourceIds: [source.id],
+    });
+    const capRow = await prisma.captureSession.findUniqueOrThrow({ where: { id: captureId } });
+    await linkClaimToContent(owner, capRow.contentId, fact.id);
+    await markSourceStale(owner, source.id, "official date changed");
+    await expect(
+      draftShortsScript(owner, captureId, { highlightCandidateId: cutId, ...SCRIPT }),
+    ).rejects.toThrow(/stale, contradicted or quarantined/);
+    await prisma.source.update({ where: { id: source.id }, data: { status: "ACTIVE" } });
 
     const music = await capture({ music: true });
     await expect(draftShortsScript(owner, music.id, SCRIPT)).rejects.toThrow(/licensed music/);

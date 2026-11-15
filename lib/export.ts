@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import type { Actor } from "@/lib/auth/context";
+import { toCanonicalRecord, type ClaimRecord } from "@/domain/canonicalTaxonomy";
 
 export type ExportType = "claims" | "sources" | "content" | "audit";
 export type ExportFormat = "csv" | "json";
@@ -16,6 +17,17 @@ function toCsv(rows: Record<string, unknown>[]): string {
   return lines.join("\n");
 }
 
+// Canonical v1.3 evidence class next to the stored legacy class (read-only
+// mapping; see domain/canonicalTaxonomy.ts).
+function canonicalColumns(c: ClaimRecord) {
+  const m = toCanonicalRecord(c);
+  return {
+    canonicalClass: m.canonical ?? "QUARANTINED",
+    canonicalNeedsReview: m.needsReview,
+    canonicalNotes: m.reasons.join("; "),
+  };
+}
+
 // Builds a workspace-scoped export. Returns flat rows with no secret fields
 // (docs/spec/01 Epic 12: "no secrets in export").
 async function collect(actor: Actor, type: ExportType): Promise<Record<string, unknown>[]> {
@@ -24,13 +36,14 @@ async function collect(actor: Actor, type: ExportType): Promise<Record<string, u
     case "claims": {
       const claims = await prisma.claim.findMany({
         where: { workspaceId: ws },
-        include: { sources: true },
+        include: { sources: { include: { source: true } } },
         orderBy: { createdAt: "asc" },
       });
       return claims.map((c) => ({
         id: c.id,
         statement: c.statement,
         classification: c.classification,
+        ...canonicalColumns(c),
         status: c.status,
         confidence: c.confidence,
         publicWording: c.publicWording,

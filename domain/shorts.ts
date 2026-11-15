@@ -15,6 +15,7 @@ import { AIValidationStatus, QuarantineStatus, PublicationStatus } from "@prisma
 import { createHash } from "node:crypto";
 import { run } from "@/lib/media/ffmpeg";
 import type { CaptionCue, RenderFormat } from "@/lib/shorts";
+import { toCanonicalRecord, blocksProduction } from "@/domain/canonicalTaxonomy";
 
 // YouTube Shorts pipeline (docs/YOUTUBE_SHORTS_PIPELINE_BLUEPRINT.md).
 // Every stage is gated:
@@ -38,6 +39,22 @@ async function loadCapture(actor: Actor, captureSessionId: string) {
     throw notFound("Capture session not found");
   }
   return capture;
+}
+
+// Stale-fact gate: a real (local) Short cannot be scripted or rendered while
+// its content item relies on a claim that is stale, contradicted, retired or
+// quarantined under the canonical taxonomy. Refresh the source first.
+async function assertClaimsCurrent(contentId: string) {
+  const links = await prisma.contentClaim.findMany({
+    where: { contentId },
+    include: { claim: { include: { sources: { include: { source: true } } } } },
+  });
+  const blocked = links.filter((l) => blocksProduction(toCanonicalRecord(l.claim)));
+  if (blocked.length > 0) {
+    throw precondition(
+      `${blocked.length} linked claim(s) are stale, contradicted or quarantined; refresh sources before production`,
+    );
+  }
 }
 
 export interface DraftOptions {
@@ -76,6 +93,7 @@ export async function draftShortsScript(
     if (capture.media.rightsStatus === "UNCLEARED") {
       throw precondition("Capture media rights are UNCLEARED; it cannot be used");
     }
+    await assertClaimsCurrent(capture.contentId);
     const cut = opts.highlightCandidateId
       ? await prisma.highlightCandidate.findUnique({ where: { id: opts.highlightCandidateId } })
       : null;
@@ -260,6 +278,7 @@ export async function renderShort(
   if (voiceover.provider === "mock") {
     throw precondition("A real render needs a real narration; the mock voiceover is silent");
   }
+  await assertClaimsCurrent(capture.contentId);
   const cues = (voiceover.cuesJson as CaptionCue[] | null) ?? [];
   const inSec = cut.trimStartSec ?? cut.startSec;
   const outSec = cut.trimEndSec ?? cut.endSec;
