@@ -10,6 +10,7 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
+    "studio": "sh scripts/dev-db.sh start && next start -H 127.0.0.1 -p 3000",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
