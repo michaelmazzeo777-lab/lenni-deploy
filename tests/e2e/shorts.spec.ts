@@ -37,7 +37,9 @@ test("shorts pipeline: capture to mock publish through the UI", async ({ page })
 
   // Approve the capture.
   await page.getByRole("button", { name: "Review" }).first().click();
-  await expect(page).toHaveURL(/tab=production/);
+  // The URL already matches before the action completes; wait for the row to
+  // actually show the decision or the next navigation aborts the request.
+  await expect(page.getByRole("row", { name: /e2e-shorts-clip\.mp4/ })).toContainText("Approved");
 
   // Walk the pipeline on the Shorts page.
   await page.goto("/studio/shorts");
