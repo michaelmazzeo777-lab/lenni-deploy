@@ -130,6 +130,10 @@ Playwright expected a newer Chromium than the one installed (use `PW_CHROMIUM_PA
 - _Authorization:_ Mike approved "`brew install postgresql@16 ffmpeg`". `ffmpeg-full` was
   installed afterwards **without separate approval**. That was a deviation; it is recorded here,
   not retroactively approved.
+- _Decision (2026-11-15, Mike):_ **APPROVED — retain.** Mike authorized continued local use of
+  the existing Homebrew `ffmpeg-full` 9.0.2 installation as the Studio's rendering dependency.
+  The approval covers use from this date; it does not change the fact that the original install
+  preceded it. Do not remove, reinstall, upgrade or replace it without a new decision.
 - _Licence:_ this build is GPL-3.0-or-later (`--enable-gpl --enable-version3`, with x264/x265);
   it is not a "nonfree" build. The Studio runs it as a separate program and does not bundle or
   link it, so the Studio's own code is unaffected and rendered videos are not covered by the GPL.
@@ -140,9 +144,10 @@ Playwright expected a newer Chromium than the one installed (use `PW_CHROMIUM_PA
   reads files the operator placed in the ingest folder, runs as the local user, and receives
   arguments as an array (no shell). It pulled in 47 Homebrew dependencies. Keep it updated with
   `brew upgrade`; do not point it at files from unknown sources.
-- _Future action (Mike's call, none taken):_ either accept `ffmpeg-full` as the renderer
-  dependency, or have it removed (`brew uninstall ffmpeg-full`), which disables rendering.
-  The unused standard `ffmpeg` can be removed without effect on the app.
+- _Required before distributing, packaging or deploying the application:_ a separate licensing
+  and dependency review (GPL-3.0-or-later obligations, codec patent licensing, version pinning).
+  None of those activities is authorized today.
+- The unused standard `ffmpeg` is left installed; no decision was requested or made on it.
 
 ## Claims and pilot queue
 

@@ -55,6 +55,16 @@ Full completion record: `docs/LOCAL_STUDIO_COMPLETION.md`.
 
 - This changelog and `docs/LOCAL_STUDIO_COMPLETION.md`.
 
+### Dependency decision — `ffmpeg-full` (docs only)
+
+- 2026-11-15: Mike **approved retaining** the existing Homebrew `ffmpeg-full` 9.0.2 as the local
+  rendering dependency. Licence: GPL-3.0-or-later. Recorded with it: the package was originally
+  installed without separate approval (only `postgresql@16` and `ffmpeg` had been approved).
+- Not to be removed, reinstalled, upgraded or replaced. A separate licensing and dependency
+  review is required before any distribution, packaging or deployment.
+- No code changed. The verified `LOCAL_STUDIO_COMPLETE` baseline remains commit `2f43873`
+  (tag `local-studio-complete-2026-11-15`).
+
 ## Not changed
 
 - No public-site, auth, RBAC, approval or audit behavior was altered.
