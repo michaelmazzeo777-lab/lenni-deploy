@@ -93,30 +93,39 @@ export async function attachCaptureMedia(actor: Actor, raw: z.input<typeof attac
   await mkdir(path.dirname(dest), { recursive: true });
   await copyFile(source, dest);
 
-  const media = await prisma.captureMedia.create({
-    data: {
-      workspaceId: actor.workspaceId,
-      captureSessionId: capture.id,
-      operator: input.operator,
-      gameMode: input.gameMode || null,
-      captureMethod: input.captureMethod,
-      sourceDevice: input.sourceDevice,
-      audioNotes: input.audioNotes || null,
-      rightsStatus: input.rightsStatus,
-      originalName: input.fileName,
-      storagePath,
-      checksumSha256,
-      sizeBytes: BigInt((await stat(dest)).size),
-      durationSec: probe.durationSec,
-      width: probe.width,
-      height: probe.height,
-      frameRate: probe.frameRate,
-      videoCodec: probe.videoCodec,
-      audioCodec: probe.audioCodec,
-      probeJson: probe.raw as object,
-      ingestedBy: actor.userId,
-    },
-  });
+  const media = await prisma.captureMedia
+    .create({
+      data: {
+        workspaceId: actor.workspaceId,
+        captureSessionId: capture.id,
+        operator: input.operator,
+        gameMode: input.gameMode || null,
+        captureMethod: input.captureMethod,
+        sourceDevice: input.sourceDevice,
+        audioNotes: input.audioNotes || null,
+        rightsStatus: input.rightsStatus,
+        originalName: input.fileName,
+        storagePath,
+        checksumSha256,
+        sizeBytes: BigInt((await stat(dest)).size),
+        durationSec: probe.durationSec,
+        width: probe.width,
+        height: probe.height,
+        frameRate: probe.frameRate,
+        videoCodec: probe.videoCodec,
+        audioCodec: probe.audioCodec,
+        probeJson: probe.raw as object,
+        ingestedBy: actor.userId,
+      },
+    })
+    .catch(async (e: unknown) => {
+      // Lost a concurrent-ingest race: remove the copied file, report cleanly.
+      await storage.remove(storagePath).catch(() => undefined);
+      if (typeof e === "object" && e !== null && (e as { code?: string }).code === "P2002") {
+        throw precondition("This capture or file was just ingested by someone else");
+      }
+      throw e;
+    });
   if (!capture.fileReference) {
     await prisma.captureSession.update({
       where: { id: capture.id },
@@ -157,8 +166,19 @@ export async function analyzeHighlights(actor: Actor, captureSessionId: string) 
   const ranked = rankHighlights(bins);
   const analysisRunId = randomUUID();
 
+  // Already-reviewed cuts are kept as history; a new candidate that mostly
+  // covers one is dropped so the same footage is never listed twice.
+  const reviewed = await prisma.highlightCandidate.findMany({
+    where: { captureSessionId, status: { not: HighlightStatus.PENDING } },
+  });
+  const covered = (c: { startSec: number; endSec: number }) =>
+    reviewed.some(
+      (r) =>
+        Math.min(c.endSec, r.endSec) - Math.max(c.startSec, r.startSec) >
+        0.5 * (c.endSec - c.startSec),
+    );
   const rows = [];
-  for (const c of ranked) {
+  for (const c of ranked.filter((x) => !covered(x))) {
     const thumbnailPath = `captures/${capture.id}/thumbs/${analysisRunId}-${c.rank}.jpg`;
     await storage.write(thumbnailPath, await extractThumbnail(file, c.peakSec));
     rows.push({

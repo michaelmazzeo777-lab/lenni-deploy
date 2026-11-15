@@ -289,6 +289,11 @@ export async function renderShort(
     media.durationSec,
     Math.max(outSec - inSec, voiceover.durationSec + 0.5),
   );
+  if (voiceover.durationSec + 0.5 > durationSec) {
+    throw precondition(
+      `Narration (${voiceover.durationSec.toFixed(1)}s) does not fit the ${durationSec.toFixed(1)}s available; shorten the script`,
+    );
+  }
   const startSec = Math.max(0, Math.min(inSec, media.durationSec - durationSec));
   const isFixture = media.rightsStatus === "INTERNAL_FIXTURE" || voiceover.isFixture;
 
