@@ -40,6 +40,8 @@ async function truncateAll() {
     "ShortsRender",
     "ShortsVoiceover",
     "ShortsScript",
+    "HighlightCandidate",
+    "CaptureMedia",
     "AuditEvent",
     "VisualAsset",
     "VisualBrief",

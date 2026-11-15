@@ -858,6 +858,8 @@ model CaptureSession {
   assignment    Assignment?    @relation(fields: [assignmentId], references: [id])
   shot          Shot?          @relation(fields: [shotId], references: [id])
   shortsScripts ShortsScript[]
+  media         CaptureMedia?
+  highlights    HighlightCandidate[]
 }
 
 // ---------- Visual production ----------
@@ -1031,10 +1033,13 @@ model ShortsScript {
   highlightsJson     Json // detected highlights, for editor reference
   safetyFlagsJson    Json // any positive flag => QUARANTINED until human review
   status             AIValidationStatus
+  // Approved highlight cut this script is built from (local pipeline only).
+  highlightCandidateId String?
   createdBy          String
   createdAt          DateTime           @default(now())
 
   captureSession CaptureSession   @relation(fields: [captureSessionId], references: [id])
+  highlightCandidate HighlightCandidate? @relation(fields: [highlightCandidateId], references: [id])
   voiceover      ShortsVoiceover?
   renders        ShortsRender[]
 }
@@ -1048,6 +1053,9 @@ model ShortsVoiceover {
   assetPath      String // written via AssetStorage under shorts/
   durationSec    Float
   duckingJson    Json // { timestampSec, gainDb }[]
+  cuesJson       Json? // { startSec, endSec, text }[] caption timing (local providers)
+  // Fixture narration (e.g. macOS system voice) is never publishable.
+  isFixture      Boolean  @default(false)
   createdBy      String
   createdAt      DateTime @default(now())
 
@@ -1065,6 +1073,12 @@ model ShortsRender {
   resolution    String // "1080x1920"
   frameRate     Int // 30 by default (cost decision, see blueprint)
   renderCostUsd Float            @default(0)
+  format        String           @default("9:16") // "9:16" | "16:9"
+  // Any fixture input (synthetic footage or fixture narration) taints the render.
+  isFixture     Boolean          @default(false)
+  checksumSha256 String?
+  bundlePath    String? // review bundle zip (local providers)
+  manifestJson  Json? // provenance: source timecodes, rights, hashes, settings
   // Human quality gate: PENDING until an Owner/Editor approves (CLEAN) or
   // rejects (REJECTED). Publish requires CLEAN.
   status        QuarantineStatus @default(PENDING)
@@ -1093,4 +1107,84 @@ model YouTubePublication {
   createdAt       DateTime          @default(now())
 
   render ShortsRender @relation(fields: [renderId], references: [id])
+}
+
+// ---- Real local capture media + explainable highlight candidates ----
+
+enum CaptureMethod {
+  PS5_NATIVE_USB
+  CAPTURE_CARD_OBS
+  SYNTHETIC_FIXTURE
+  OTHER
+}
+
+enum MediaRightsStatus {
+  OWNED_ORIGINAL_CAPTURE
+  INTERNAL_FIXTURE
+  UNCLEARED
+}
+
+enum HighlightStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// A real video file ingested from the local ingest folder and attached to a
+// CaptureSession. Provenance is recorded at ingest and never edited.
+model CaptureMedia {
+  id               String            @id @default(cuid())
+  workspaceId      String
+  captureSessionId String            @unique
+  operator         String
+  gameMode         String?
+  captureMethod    CaptureMethod
+  sourceDevice     String
+  audioNotes       String?
+  rightsStatus     MediaRightsStatus
+  originalName     String
+  storagePath      String
+  checksumSha256   String
+  sizeBytes        BigInt
+  durationSec      Float
+  width            Int
+  height           Int
+  frameRate        Float
+  videoCodec       String
+  audioCodec       String?
+  probeJson        Json
+  ingestedBy       String
+  createdAt        DateTime          @default(now())
+
+  captureSession CaptureSession @relation(fields: [captureSessionId], references: [id])
+
+  @@unique([workspaceId, checksumSha256])
+}
+
+// One ranked candidate window from a highlight analysis run. The score ranks
+// visual/audio excitement only - it is never evidence for a gameplay claim.
+model HighlightCandidate {
+  id               String          @id @default(cuid())
+  workspaceId      String
+  captureSessionId String
+  analysisRunId    String
+  rank             Int
+  startSec         Float
+  endSec           Float
+  peakSec          Float
+  score            Float
+  signalsJson      Json // per-signal contributions + human-readable reasons
+  thumbnailPath    String?
+  status           HighlightStatus @default(PENDING)
+  trimStartSec     Float?
+  trimEndSec       Float?
+  reviewNotes      String?
+  reviewedBy       String?
+  analyzerVersion  String
+  createdAt        DateTime        @default(now())
+
+  captureSession CaptureSession @relation(fields: [captureSessionId], references: [id])
+  shortsScripts  ShortsScript[]
+
+  @@index([captureSessionId, status])
 }

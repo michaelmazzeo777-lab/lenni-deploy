@@ -12,6 +12,9 @@ import {
   getYouTubePublisher,
 } from "@/lib/shorts";
 import { AIValidationStatus, QuarantineStatus, PublicationStatus } from "@prisma/client";
+import { createHash } from "node:crypto";
+import { run } from "@/lib/media/ffmpeg";
+import type { CaptionCue, RenderFormat } from "@/lib/shorts";
 
 // YouTube Shorts pipeline (docs/YOUTUBE_SHORTS_PIPELINE_BLUEPRINT.md).
 // Every stage is gated:
@@ -19,14 +22,17 @@ import { AIValidationStatus, QuarantineStatus, PublicationStatus } from "@prisma
 //   voiceover— only from a VALID (not quarantined/failed) script
 //   render   — lands PENDING; a human must approve it (CLEAN) or reject it
 //   publish  — Owner-only; render must be CLEAN; disclosure flags always sent
-// All providers are deterministic mocks until real credentials are configured.
+// Providers default to deterministic mocks. With the local-* providers the
+// same gates apply, plus: real ingested media with cleared rights, an APPROVED
+// highlight cut, an audible narration, and a fixture taint that blocks publish.
 
 const DURATION_CEILING_SEC = 60;
+const FIXTURE_LABEL = "INTERNAL TECHNICAL FIXTURE - NOT GAMEPLAY - NOT FOR PUBLICATION";
 
 async function loadCapture(actor: Actor, captureSessionId: string) {
   const capture = await prisma.captureSession.findUnique({
     where: { id: captureSessionId },
-    include: { content: true },
+    include: { content: true, media: true },
   });
   if (!capture || capture.content.workspaceId !== actor.workspaceId) {
     throw notFound("Capture session not found");
@@ -34,7 +40,17 @@ async function loadCapture(actor: Actor, captureSessionId: string) {
   return capture;
 }
 
-export async function draftShortsScript(actor: Actor, captureSessionId: string) {
+export interface DraftOptions {
+  highlightCandidateId?: string;
+  hookText?: string;
+  lines?: string[];
+}
+
+export async function draftShortsScript(
+  actor: Actor,
+  captureSessionId: string,
+  opts: DraftOptions = {},
+) {
   require_(actor, "ai.generate");
   const capture = await loadCapture(actor, captureSessionId);
 
@@ -48,12 +64,42 @@ export async function draftShortsScript(actor: Actor, captureSessionId: string) 
   if (!capture.fileReference) {
     throw precondition("Capture has no file reference to analyze");
   }
+  if (capture.containsLicensedMusic) {
+    throw precondition("Captures containing licensed music cannot enter the Shorts pipeline");
+  }
 
   const provider = getShortsScriptProvider();
-  const result = await provider.analyzeAndDraft({
-    videoReference: capture.fileReference,
-    durationCeilingSec: DURATION_CEILING_SEC,
-  });
+  let highlightCandidateId: string | null = null;
+  let highlights: { timestampSec: number; label: string; confidence: number }[] | undefined;
+  if (provider.name !== "mock") {
+    if (!capture.media) throw precondition("Attach the capture's real video file first");
+    if (capture.media.rightsStatus === "UNCLEARED") {
+      throw precondition("Capture media rights are UNCLEARED; it cannot be used");
+    }
+    const cut = opts.highlightCandidateId
+      ? await prisma.highlightCandidate.findUnique({ where: { id: opts.highlightCandidateId } })
+      : null;
+    if (!cut || cut.captureSessionId !== captureSessionId) {
+      throw precondition("Choose a highlight cut from this capture");
+    }
+    if (cut.status !== "APPROVED") {
+      throw precondition("Only an APPROVED highlight cut can be scripted");
+    }
+    highlightCandidateId = cut.id;
+    highlights = [
+      { timestampSec: cut.peakSec, label: `cut-rank-${cut.rank}`, confidence: cut.score },
+    ];
+  }
+  const result = await provider
+    .analyzeAndDraft({
+      videoReference: capture.fileReference,
+      durationCeilingSec: DURATION_CEILING_SEC,
+      operatorScript: { hookText: opts.hookText ?? "", lines: opts.lines ?? [] },
+      highlights,
+    })
+    .catch((e: unknown) => {
+      throw precondition(e instanceof Error ? e.message : "Script draft failed");
+    });
 
   // Any positive safety flag quarantines the script for human review — the
   // pipeline never silently auto-filters or auto-passes flagged content.
@@ -71,6 +117,7 @@ export async function draftShortsScript(actor: Actor, captureSessionId: string) 
       highlightsJson: result.detectedHighlights as unknown as object,
       safetyFlagsJson: result.safetyFlags as unknown as object,
       status,
+      highlightCandidateId,
       createdBy: actor.userId,
     },
   });
@@ -104,7 +151,15 @@ export async function synthesizeVoiceover(actor: Actor, scriptId: string, voiceP
   const scriptText = [script.hookText, ...sections.map((s) => s.text)].join(" ");
 
   const provider = getTTSProvider();
-  const result = await provider.synthesize({ scriptText, voiceProfileId });
+  const result = await provider
+    .synthesize({
+      scriptText,
+      voiceProfileId,
+      segments: [script.hookText, ...sections.map((s) => s.text)],
+    })
+    .catch((e: unknown) => {
+      throw precondition(e instanceof Error ? e.message : "Narration failed");
+    });
 
   const storage = getAssetStorage();
   const assetPath = `shorts/voiceover/${scriptId}.wav`;
@@ -120,6 +175,8 @@ export async function synthesizeVoiceover(actor: Actor, scriptId: string, voiceP
         assetPath,
         durationSec: result.durationSec,
         duckingJson: result.duckingCurve as unknown as object,
+        cuesJson: (result.cues as unknown as object) ?? undefined,
+        isFixture: result.isFixture ?? false,
         createdBy: actor.userId,
       },
     })
@@ -141,37 +198,209 @@ export async function synthesizeVoiceover(actor: Actor, scriptId: string, voiceP
   return voiceover;
 }
 
-export async function renderShort(actor: Actor, voiceoverId: string, attributionText: string) {
+const srtTime = (sec: number) => {
+  const ms = Math.max(0, Math.round(sec * 1000));
+  const p = (n: number, w = 2) => String(n).padStart(w, "0");
+  return `${p(Math.floor(ms / 3600000))}:${p(Math.floor(ms / 60000) % 60)}:${p(Math.floor(ms / 1000) % 60)},${p(ms % 1000, 3)}`;
+};
+const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+
+export async function renderShort(
+  actor: Actor,
+  voiceoverId: string,
+  attributionText: string,
+  format: RenderFormat = "9:16",
+) {
   require_(actor, "ai.generate");
   const voiceover = await prisma.shortsVoiceover.findUnique({
     where: { id: voiceoverId },
-    include: { script: { include: { captureSession: true } } },
+    include: {
+      script: {
+        include: { captureSession: { include: { media: true } }, highlightCandidate: true },
+      },
+    },
   });
   if (!voiceover || voiceover.workspaceId !== actor.workspaceId) {
     throw notFound("Voiceover not found");
   }
 
   const provider = getVideoCompositorProvider();
-  const result = await provider.render({
-    sourceVideoReference: voiceover.script.captureSession.fileReference ?? "",
-    voiceoverAssetPath: voiceover.assetPath,
-    attributionText,
-  });
-
   const storage = getAssetStorage();
-  const storagePath = `shorts/render/${voiceoverId}-${Date.now()}.mp4`;
-  await storage.write(storagePath, result.videoBytes);
+  const capture = voiceover.script.captureSession;
 
-  const render = await prisma.shortsRender.create({
-    data: {
-      workspaceId: actor.workspaceId,
-      scriptId: voiceover.scriptId,
-      voiceoverId,
+  if (provider.name === "mock") {
+    const result = await provider.render({
+      sourceVideoReference: capture.fileReference ?? "",
+      voiceoverAssetPath: voiceover.assetPath,
+      attributionText,
+    });
+    const storagePath = `shorts/render/${voiceoverId}-${Date.now()}.mp4`;
+    await storage.write(storagePath, result.videoBytes);
+    return recordRender(actor, voiceover, provider.name, {
       storagePath,
       durationSec: result.durationSec,
       resolution: result.resolution,
       frameRate: result.frameRate,
       renderCostUsd: result.renderCostUsd,
+    });
+  }
+
+  // ---- Real local render. Every gate is re-checked at render time. ----
+  const media = capture.media;
+  const cut = voiceover.script.highlightCandidate;
+  if (capture.flagLeaked || capture.status !== "APPROVED") {
+    throw precondition("The capture is no longer approved for use");
+  }
+  if (!media || media.rightsStatus === "UNCLEARED") {
+    throw precondition("Capture media is missing or its rights are UNCLEARED");
+  }
+  if (!cut || cut.status !== "APPROVED") {
+    throw precondition("The highlight cut is not APPROVED; rejected footage cannot be rendered");
+  }
+  if (voiceover.provider === "mock") {
+    throw precondition("A real render needs a real narration; the mock voiceover is silent");
+  }
+  const cues = (voiceover.cuesJson as CaptionCue[] | null) ?? [];
+  const inSec = cut.trimStartSec ?? cut.startSec;
+  const outSec = cut.trimEndSec ?? cut.endSec;
+  // Long enough for the narration, never past the source or the Shorts ceiling.
+  const ceiling = format === "9:16" ? DURATION_CEILING_SEC : 600;
+  const durationSec = Math.min(
+    ceiling,
+    media.durationSec,
+    Math.max(outSec - inSec, voiceover.durationSec + 0.5),
+  );
+  const startSec = Math.max(0, Math.min(inSec, media.durationSec - durationSec));
+  const isFixture = media.rightsStatus === "INTERNAL_FIXTURE" || voiceover.isFixture;
+
+  const result = await provider
+    .render({
+      sourceVideoReference: capture.fileReference ?? "",
+      voiceoverAssetPath: voiceover.assetPath,
+      attributionText,
+      sourceVideoPath: storage.absolutePath(media.storagePath),
+      sourceHasAudio: media.audioCodec !== null,
+      voiceoverPath: storage.absolutePath(voiceover.assetPath),
+      clip: { startSec, durationSec },
+      cues,
+      format,
+      fixtureLabel: isFixture ? FIXTURE_LABEL : undefined,
+    })
+    .catch((e: unknown) => {
+      throw precondition(`Render failed: ${e instanceof Error ? e.message : "unknown error"}`);
+    });
+
+  // Review bundle: master + captions + transcript + cover + provenance manifest.
+  const dir = `shorts/render/${voiceoverId}-${format.replace(":", "x")}-${Date.now()}`;
+  const sections = voiceover.script.sectionsJson as { text: string }[];
+  const srt = cues
+    .filter((c) => c.startSec < durationSec)
+    .map(
+      (c, i) =>
+        `${i + 1}\n${srtTime(c.startSec)} --> ${srtTime(Math.min(c.endSec, durationSec))}\n${c.text}\n`,
+    )
+    .join("\n");
+  const transcript = [voiceover.script.hookText, ...sections.map((s) => s.text)].join("\n") + "\n";
+  const checksumSha256 = sha256(result.videoBytes);
+  const manifest = {
+    status: isFixture ? "INTERNAL_TECHNICAL_FIXTURE" : "PENDING_HUMAN_REVIEW",
+    publication: "PUBLICATION_BLOCKED",
+    format,
+    resolution: result.resolution,
+    frameRate: result.frameRate,
+    durationSec: result.durationSec,
+    masterSha256: checksumSha256,
+    providers: {
+      script: voiceover.script.provider,
+      narration: voiceover.provider,
+      compositor: provider.name,
+    },
+    narration: { isFixture: voiceover.isFixture, voiceProfileId: voiceover.voiceProfileId },
+    source: {
+      captureId: capture.id,
+      originalName: media.originalName,
+      sha256: media.checksumSha256,
+      operator: media.operator,
+      platform: capture.platform,
+      gameVersion: capture.gameVersion,
+      gameMode: media.gameMode,
+      captureDate: capture.captureDate.toISOString(),
+      captureMethod: media.captureMethod,
+      sourceDevice: media.sourceDevice,
+      resolution: `${media.width}x${media.height}@${media.frameRate}`,
+      hudVisible: capture.hudVisible,
+      spoilerLevel: capture.spoilerLevel,
+      rightsStatus: media.rightsStatus,
+    },
+    edl: [
+      {
+        event: 1,
+        sourceInSec: startSec,
+        sourceOutSec: startSec + durationSec,
+        highlightCandidateId: cut.id,
+        analyzer: cut.analyzerVersion,
+        score: cut.score,
+        approvedBy: cut.reviewedBy,
+      },
+    ],
+    script: { hookText: voiceover.script.hookText, sections: sections.map((s) => s.text) },
+    attributionText,
+    costUsd: result.renderCostUsd,
+  };
+  const files: [string, Buffer][] = [
+    ["master.mp4", result.videoBytes],
+    ["captions.srt", Buffer.from(srt)],
+    ["transcript.txt", Buffer.from(transcript)],
+    ["manifest.json", Buffer.from(JSON.stringify(manifest, null, 2))],
+  ];
+  if (result.coverJpg) files.push(["cover.jpg", result.coverJpg]);
+  for (const [name, bytes] of files) await storage.write(`${dir}/${name}`, bytes);
+  const bundlePath = `${dir}/bundle.zip`;
+  await run("zip", [
+    "-q",
+    "-j",
+    "-X",
+    storage.absolutePath(bundlePath),
+    ...files.map(([n]) => storage.absolutePath(`${dir}/${n}`)),
+  ]);
+
+  return recordRender(actor, voiceover, provider.name, {
+    storagePath: `${dir}/master.mp4`,
+    durationSec: result.durationSec,
+    resolution: result.resolution,
+    frameRate: result.frameRate,
+    renderCostUsd: result.renderCostUsd,
+    format,
+    isFixture,
+    checksumSha256,
+    bundlePath,
+    manifestJson: manifest,
+  });
+}
+
+async function recordRender(
+  actor: Actor,
+  voiceover: { id: string; scriptId: string },
+  providerName: string,
+  data: {
+    storagePath: string;
+    durationSec: number;
+    resolution: string;
+    frameRate: number;
+    renderCostUsd: number;
+    format?: string;
+    isFixture?: boolean;
+    checksumSha256?: string;
+    bundlePath?: string;
+    manifestJson?: object;
+  },
+) {
+  const render = await prisma.shortsRender.create({
+    data: {
+      workspaceId: actor.workspaceId,
+      scriptId: voiceover.scriptId,
+      voiceoverId: voiceover.id,
+      ...data,
       status: QuarantineStatus.PENDING,
       createdBy: actor.userId,
     },
@@ -182,7 +411,7 @@ export async function renderShort(actor: Actor, voiceoverId: string, attribution
     action: "shorts.rendered",
     entityType: "ShortsRender",
     entityId: render.id,
-    metadata: { voiceoverId, provider: provider.name, costUsd: result.renderCostUsd },
+    metadata: { voiceoverId: voiceover.id, provider: providerName, costUsd: data.renderCostUsd },
   });
   return render;
 }
@@ -263,6 +492,9 @@ export async function publishShort(actor: Actor, raw: PublishShortInput) {
   if (!render || render.workspaceId !== actor.workspaceId) throw notFound("Render not found");
   if (render.status !== "CLEAN") {
     throw precondition("Only a human-approved (CLEAN) render may be published");
+  }
+  if (render.isFixture) {
+    throw precondition("Technical fixture renders can never be published");
   }
   if (render.publication) {
     throw precondition(

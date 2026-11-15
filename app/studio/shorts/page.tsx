@@ -2,6 +2,7 @@ import { requireStudioActor } from "@/lib/auth/guard";
 import { prisma } from "@/lib/db";
 import { can } from "@/lib/permissions";
 import { Banner } from "@/app/_ui";
+import { AUDIO_EXT, listIngestFiles } from "@/lib/media/ingest";
 import {
   draftShortsScriptAction,
   synthesizeVoiceoverAction,
@@ -28,7 +29,12 @@ export default async function ShortsPage({
         targetsShorts: true,
         status: "APPROVED",
       },
-      include: { content: true, shortsScripts: true },
+      include: {
+        content: true,
+        shortsScripts: true,
+        media: true,
+        highlights: { where: { status: "APPROVED" }, orderBy: { rank: "asc" } },
+      },
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
@@ -48,15 +54,34 @@ export default async function ShortsPage({
   const mayReview = can(actor, "capture.review");
   const mayPublish = can(actor, "shorts.publish");
 
+  // Provider names label every button, so the operator always sees whether a
+  // step is the deterministic mock or the real local pipeline.
+  const scriptP = process.env.SHORTS_SCRIPT_PROVIDER ?? "mock";
+  const ttsP = process.env.TTS_PROVIDER ?? "mock";
+  const videoP = process.env.VIDEO_COMPOSITOR_PROVIDER ?? "mock";
+  const local = videoP !== "mock";
+  const recordings = ttsP === "operator-recording" ? await listIngestFiles(AUDIO_EXT) : [];
+
   return (
     <div>
       <h1>Shorts pipeline</h1>
       <p className="muted">
         Capture (approved, Shorts-flagged) → AI script draft → voiceover → render → human review →
-        publish. All providers run in <strong>mock mode</strong> (deterministic, $0, no external
-        calls) until real credentials are configured — a mock publish records a clearly-marked fake
-        video ID and never reaches YouTube. Safety-flagged scripts are quarantined for human review,
-        never auto-passed.
+        publish.{" "}
+        {local ? (
+          <>
+            Running the <strong>local pipeline</strong> (script: {scriptP}, narration: {ttsP},
+            render: {videoP}) — real MP4s rendered on this machine, $0, no external calls. Renders
+            from fixture footage or fixture narration are labeled and can never be published.
+          </>
+        ) : (
+          <>
+            All providers run in <strong>mock mode</strong> (deterministic, $0, no external calls)
+            until real credentials are configured.
+          </>
+        )}{" "}
+        A mock publish records a clearly-marked fake video ID and never reaches YouTube.
+        Safety-flagged scripts are quarantined for human review, never auto-passed.
       </p>
       <Banner error={error} />
 
@@ -86,7 +111,36 @@ export default async function ShortsPage({
                   <td className="muted">{c.platform}</td>
                   <td className="muted">{c.shortsScripts.length}</td>
                   <td>
-                    {mayGenerate ? (
+                    {mayGenerate && scriptP !== "mock" ? (
+                      c.highlights.length === 0 ? (
+                        <span className="muted">
+                          Approve a highlight cut in Capture intake first.
+                        </span>
+                      ) : (
+                        c.highlights.map((h) => (
+                          <details key={h.id}>
+                            <summary>
+                              Write script for cut {h.rank} (
+                              {(h.trimStartSec ?? h.startSec).toFixed(0)}
+                              s–{(h.trimEndSec ?? h.endSec).toFixed(0)}s)
+                            </summary>
+                            <form action={draftShortsScriptAction}>
+                              <input type="hidden" name="captureSessionId" value={c.id} />
+                              <input type="hidden" name="highlightCandidateId" value={h.id} />
+                              <label htmlFor={`hook-${h.id}`}>Hook</label>
+                              <input id={`hook-${h.id}`} name="hookText" required />
+                              <label htmlFor={`lines-${h.id}`}>Script lines (one per line)</label>
+                              <textarea id={`lines-${h.id}`} name="lines" rows={3} required />
+                              <div style={{ marginTop: 8 }}>
+                                <button type="submit" className="secondary">
+                                  Save script ({scriptP})
+                                </button>
+                              </div>
+                            </form>
+                          </details>
+                        ))
+                      )
+                    ) : mayGenerate ? (
                       <form action={draftShortsScriptAction}>
                         <input type="hidden" name="captureSessionId" value={c.id} />
                         <button type="submit" className="secondary">
@@ -122,8 +176,17 @@ export default async function ShortsPage({
           {script.status === "VALID" && !script.voiceover && mayGenerate ? (
             <form action={synthesizeVoiceoverAction} className="row" style={{ gap: 8 }}>
               <input type="hidden" name="scriptId" value={script.id} />
+              {ttsP === "operator-recording" ? (
+                <select name="voiceProfileId" aria-label="Narration recording" required>
+                  {recordings.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <button type="submit" className="secondary">
-                Synthesize voiceover (mock)
+                Synthesize voiceover ({ttsP})
               </button>
             </form>
           ) : null}
@@ -134,14 +197,23 @@ export default async function ShortsPage({
               {/* Re-rendering is allowed when every previous render was
                   rejected (the regenerate path); hidden only while a render
                   is pending review or already approved. */}
-              {mayGenerate && !script.renders.some((r) => r.status !== "REJECTED") ? (
-                <form action={renderShortAction} style={{ display: "inline", marginLeft: 8 }}>
-                  <input type="hidden" name="voiceoverId" value={script.voiceover.id} />
-                  <button type="submit" className="secondary">
-                    {script.renders.length > 0 ? "Re-render (mock)" : "Render (mock)"}
-                  </button>
-                </form>
-              ) : null}
+              {(local ? ["9:16", "16:9"] : ["9:16"]).map((format) =>
+                mayGenerate &&
+                !script.renders.some((r) => r.format === format && r.status !== "REJECTED") ? (
+                  <form
+                    key={format}
+                    action={renderShortAction}
+                    style={{ display: "inline", marginLeft: 8 }}
+                  >
+                    <input type="hidden" name="voiceoverId" value={script.voiceover!.id} />
+                    <input type="hidden" name="format" value={format} />
+                    <button type="submit" className="secondary">
+                      {script.renders.some((r) => r.format === format) ? "Re-render" : "Render"}
+                      {local ? ` ${format}` : ""} ({videoP})
+                    </button>
+                  </form>
+                ) : null,
+              )}
             </div>
           ) : null}
 
@@ -167,6 +239,12 @@ export default async function ShortsPage({
                 >
                   {r.status}
                 </span>
+                {r.isFixture ? (
+                  <>
+                    {" "}
+                    <span className="badge LEAKED">FIXTURE — never publishable</span>
+                  </>
+                ) : null}
                 {r.publication?.status === "PUBLISHED" ? (
                   <>
                     {" "}
@@ -177,6 +255,31 @@ export default async function ShortsPage({
                   </>
                 ) : null}
               </p>
+
+              {r.bundlePath && r.status !== "REJECTED" ? (
+                <div className="row" style={{ gap: 16, alignItems: "flex-start", marginTop: 8 }}>
+                  <video
+                    controls
+                    preload="metadata"
+                    poster={`/studio/media/cover/${r.id}`}
+                    style={{ width: r.format === "16:9" ? 360 : 200, background: "#000" }}
+                    src={`/studio/media/render/${r.id}`}
+                  />
+                  <div className="muted" style={{ fontSize: "0.78rem" }}>
+                    <div>
+                      {r.format} · {r.durationSec.toFixed(1)}s · real H.264/AAC MP4
+                    </div>
+                    <div>
+                      SHA-256: <code>{r.checksumSha256}</code>
+                    </div>
+                    <div>
+                      <a href={`/studio/media/bundle/${r.id}`}>
+                        Download review bundle (MP4, SRT, transcript, cover, manifest)
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               {r.status === "PENDING" && mayReview ? (
                 <form action={reviewRenderAction} className="row" style={{ gap: 8, marginTop: 6 }}>
@@ -192,7 +295,7 @@ export default async function ShortsPage({
                 </form>
               ) : null}
 
-              {r.status === "CLEAN" && !r.publication && mayPublish ? (
+              {r.status === "CLEAN" && !r.publication && mayPublish && !r.isFixture ? (
                 <form action={publishShortAction} style={{ marginTop: 6 }}>
                   <input type="hidden" name="renderId" value={r.id} />
                   <label htmlFor={`title-${r.id}`}>Title</label>

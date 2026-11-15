@@ -10,13 +10,20 @@ import {
   MockVideoCompositorProvider,
   MockYouTubePublisher,
 } from "@/lib/shorts/mock-providers";
+import {
+  LocalOperatorScriptProvider,
+  LocalSayFixtureTTSProvider,
+  OperatorRecordingProvider,
+  LocalFfmpegCompositorProvider,
+} from "@/lib/shorts/local-providers";
 
 export * from "@/lib/shorts/types";
 export { MOCK_SAFETY_TRIGGER } from "@/lib/shorts/mock-providers";
 
 // Provider selection, server-side env only. Deny-by-default: every provider
-// is the deterministic mock unless explicitly configured AND credentialed.
-// Real implementations are added only when Mike supplies credentials
+// is the deterministic mock unless explicitly configured. The local-* providers
+// run entirely on this machine ($0, no network, no credentials). Hosted
+// implementations are added only when Mike supplies credentials
 // (docs/YOUTUBE_SHORTS_PIPELINE_BLUEPRINT.md §6); until then a non-mock
 // selection fails loudly rather than silently falling back.
 
@@ -31,18 +38,22 @@ function requireConfigured(kind: string, provider: string, keyVar: string): neve
 export function getShortsScriptProvider(): ShortsScriptProvider {
   const p = process.env.SHORTS_SCRIPT_PROVIDER ?? "mock";
   if (p === "mock") return new MockShortsScriptProvider();
+  if (p === "local-operator") return new LocalOperatorScriptProvider();
   return requireConfigured("Shorts script", p, "SHORTS_SCRIPT_API_KEY");
 }
 
 export function getTTSProvider(): TTSProvider {
   const p = process.env.TTS_PROVIDER ?? "mock";
   if (p === "mock") return new MockTTSProvider();
+  if (p === "local-say-fixture") return new LocalSayFixtureTTSProvider();
+  if (p === "operator-recording") return new OperatorRecordingProvider();
   return requireConfigured("TTS", p, "TTS_API_KEY");
 }
 
 export function getVideoCompositorProvider(): VideoCompositorProvider {
   const p = process.env.VIDEO_COMPOSITOR_PROVIDER ?? "mock";
   if (p === "mock") return new MockVideoCompositorProvider();
+  if (p === "local-ffmpeg") return new LocalFfmpegCompositorProvider();
   return requireConfigured("Video compositor", p, "VIDEO_COMPOSITOR_API_KEY");
 }
 

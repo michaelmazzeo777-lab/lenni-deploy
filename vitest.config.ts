@@ -26,6 +26,11 @@ export default defineConfig({
       AI_ENABLED: "true",
       APP_BASE_URL: "http://localhost:3000",
       STORAGE_ROOT: "./.data/storage-test",
+      // Deterministic mocks by default; tests/integration/local-media.test.ts
+      // switches to the local providers itself.
+      SHORTS_SCRIPT_PROVIDER: "mock",
+      TTS_PROVIDER: "mock",
+      VIDEO_COMPOSITOR_PROVIDER: "mock",
     },
   },
 });

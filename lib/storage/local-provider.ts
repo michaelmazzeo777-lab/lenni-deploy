@@ -23,6 +23,12 @@ export class LocalAssetStorage implements AssetStorage {
     return full;
   }
 
+  // Absolute on-disk path for tools that need a real file (ffmpeg). Still
+  // confined to the storage root.
+  absolutePath(relativePath: string): string {
+    return this.resolve(relativePath);
+  }
+
   async write(relativePath: string, bytes: Buffer): Promise<StoredObjectMeta> {
     const full = this.resolve(relativePath);
     await mkdir(path.dirname(full), { recursive: true });

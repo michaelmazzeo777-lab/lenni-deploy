@@ -34,7 +34,16 @@ async function run(fn: () => Promise<unknown>) {
 
 export async function draftShortsScriptAction(fd: FormData) {
   const actor = await requireActor();
-  await run(() => draftShortsScript(actor, s(fd, "captureSessionId")));
+  await run(() =>
+    draftShortsScript(actor, s(fd, "captureSessionId"), {
+      highlightCandidateId: s(fd, "highlightCandidateId") || undefined,
+      hookText: s(fd, "hookText"),
+      lines: s(fd, "lines")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean),
+    }),
+  );
 }
 
 export async function synthesizeVoiceoverAction(fd: FormData) {
@@ -47,7 +56,12 @@ export async function synthesizeVoiceoverAction(fd: FormData) {
 export async function renderShortAction(fd: FormData) {
   const actor = await requireActor();
   await run(() =>
-    renderShort(actor, s(fd, "voiceoverId"), s(fd, "attributionText") || "Leonida Field Guide"),
+    renderShort(
+      actor,
+      s(fd, "voiceoverId"),
+      s(fd, "attributionText") || "Leonida Field Guide",
+      s(fd, "format") === "16:9" ? "16:9" : "9:16",
+    ),
   );
 }
 
