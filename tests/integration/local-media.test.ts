@@ -20,6 +20,9 @@ import { LocalAssetStorage } from "@/lib/storage/local-provider";
 import { meanVolumeDb, probeVideo } from "@/lib/media/ffmpeg";
 import { createSource, createClaim, linkClaimToContent } from "@/domain/evidence";
 import { markSourceStale } from "@/domain/updates";
+import { resolveMediaTarget } from "@/domain/mediaAccess";
+import { buildExport } from "@/lib/export";
+import { readdir } from "node:fs/promises";
 
 // Real local pipeline, end to end, on synthetic fixtures: ingest -> highlight
 // analysis -> approve/trim -> operator script -> narration -> real MP4 render.
@@ -27,6 +30,7 @@ import { markSourceStale } from "@/domain/updates";
 
 type A = Awaited<ReturnType<Awaited<ReturnType<typeof makeWorkspace>>["actor"]>>;
 let owner: A, editor: A;
+let ws: Awaited<ReturnType<typeof makeWorkspace>>;
 const INGEST = path.resolve("./.data/ingest-test");
 const storage = new LocalAssetStorage(process.env.STORAGE_ROOT);
 const ENV = {
@@ -49,6 +53,8 @@ beforeAll(async () => {
   await makeFixture(FIX_A, path.join(INGEST, "a.mp4"), SCALE);
   await makeFixture(FIX_B, path.join(INGEST, "b.mp4"), SCALE);
   await makeFixture(FIXTURES[2]!, path.join(INGEST, "c.mp4"), 0.3);
+  await makeFixture(FIX_A, path.join(INGEST, "d.mp4"), 0.2);
+  await makeFixture(FIX_B, path.join(INGEST, "e.mp4"), 0.2);
   await writeFile(path.join(INGEST, "garbage.mp4"), "this is not a video");
   // The mock compositor's ftyp-only placeholder must never pass as real video.
   await writeFile(
@@ -62,7 +68,7 @@ beforeAll(async () => {
   );
   await symlink("/etc/hosts", path.join(INGEST, "link.mp4")).catch(() => undefined);
 
-  const ws = await makeWorkspace();
+  ws = await makeWorkspace();
   owner = await ws.actor([Role.OWNER], "owner");
   editor = await ws.actor([Role.EDITOR], "editor");
 }, 120_000);
@@ -364,4 +370,139 @@ describe("real local render", () => {
     process.env.TTS_PROVIDER = ENV.TTS_PROVIDER;
     await expect(renderShort(owner, vo.id, "x")).rejects.toThrow(/mock voiceover is silent/);
   }, 60_000);
+});
+
+describe("regressions for the review fixes", () => {
+  it("refuses a narration that is longer than the source clip instead of cutting it off", async () => {
+    const vo = await prisma.shortsVoiceover.findFirstOrThrow({
+      where: { script: { captureSessionId: capA }, provider: "local-say-fixture" },
+    });
+    const media = await prisma.captureMedia.findUniqueOrThrow({
+      where: { captureSessionId: capA },
+    });
+    const before = await prisma.shortsRender.count({ where: { voiceoverId: vo.id } });
+    await prisma.shortsVoiceover.update({
+      where: { id: vo.id },
+      data: { durationSec: media.durationSec + 1 },
+    });
+    await expect(renderShort(owner, vo.id, "x")).rejects.toThrow(/does not fit/);
+    await expect(renderShort(owner, vo.id, "x", "16:9")).rejects.toThrow(/does not fit/);
+    await prisma.shortsVoiceover.update({
+      where: { id: vo.id },
+      data: { durationSec: vo.durationSec },
+    });
+    expect(await prisma.shortsRender.count({ where: { voiceoverId: vo.id } })).toBe(before);
+  });
+
+  it("repeated analysis never lists already-approved footage a second time", async () => {
+    const counts: number[] = [];
+    for (let run = 0; run < 2; run++) {
+      await analyzeHighlights(editor, capA);
+      const all = await prisma.highlightCandidate.findMany({ where: { captureSessionId: capA } });
+      const reviewed = all.filter((c) => c.status !== "PENDING");
+      expect(reviewed.some((c) => c.id === cutA && c.status === "APPROVED")).toBe(true);
+      for (const p of all.filter((c) => c.status === "PENDING")) {
+        for (const r of reviewed) {
+          const overlap = Math.min(p.endSec, r.endSec) - Math.max(p.startSec, r.startSec);
+          expect(overlap).toBeLessThanOrEqual(0.5 * (p.endSec - p.startSec));
+        }
+      }
+      counts.push(all.length);
+    }
+    expect(counts[1]).toBe(counts[0]);
+  });
+
+  it("a lost ingest race leaves no orphan file; a double submit keeps the stored file", async () => {
+    const files = async (captureId: string) =>
+      (await readdir(storage.absolutePath(`captures/${captureId}`))).filter((f) =>
+        f.endsWith(".mp4"),
+      );
+    // Two different files racing for one capture: exactly one wins.
+    const c = await capture();
+    const race = await Promise.allSettled(
+      ["d.mp4", "e.mp4"].map((fileName) =>
+        attachCaptureMedia(owner, { captureSessionId: c.id, fileName, ...fixtureMeta }),
+      ),
+    );
+    expect(race.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const lost = race.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    expect(lost.reason).toMatchObject({ code: "PRECONDITION_FAILED" });
+    const media = await prisma.captureMedia.findUniqueOrThrow({
+      where: { captureSessionId: c.id },
+    });
+    expect(await files(c.id)).toEqual([path.basename(media.storagePath)]);
+
+    // The same file submitted twice (double click): the stored copy survives.
+    const loser = media.originalName === "d.mp4" ? "e.mp4" : "d.mp4";
+    const c2 = await capture();
+    const twice = await Promise.allSettled(
+      [1, 2].map(() =>
+        attachCaptureMedia(owner, { captureSessionId: c2.id, fileName: loser, ...fixtureMeta }),
+      ),
+    );
+    expect(twice.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const media2 = await prisma.captureMedia.findUniqueOrThrow({
+      where: { captureSessionId: c2.id },
+    });
+    expect(await storage.exists(media2.storagePath)).toBe(true);
+    expect(await files(c2.id)).toHaveLength(1);
+  });
+});
+
+describe("workspace isolation for capture media, cuts, renders and exports", () => {
+  it("another workspace's Owner can neither act on nor fetch this workspace's records", async () => {
+    const other = await makeWorkspace();
+    const intruder = await other.actor([Role.OWNER], "intruder");
+    const render = await prisma.shortsRender.findFirstOrThrow({
+      where: { script: { captureSessionId: capA }, status: { not: "REJECTED" } },
+    });
+    const NOT_FOUND = { code: "NOT_FOUND" };
+
+    await expect(
+      attachCaptureMedia(intruder, { captureSessionId: capA, fileName: "c.mp4", ...fixtureMeta }),
+    ).rejects.toMatchObject(NOT_FOUND);
+    await expect(analyzeHighlights(intruder, capA)).rejects.toMatchObject(NOT_FOUND);
+    await expect(
+      reviewHighlight(intruder, { candidateId: cutA, decision: "REJECTED" }),
+    ).rejects.toMatchObject(NOT_FOUND);
+    await expect(
+      draftShortsScript(intruder, capA, { highlightCandidateId: cutA, ...SCRIPT }),
+    ).rejects.toMatchObject(NOT_FOUND);
+    await expect(renderShort(intruder, render.voiceoverId, "x")).rejects.toMatchObject(NOT_FOUND);
+    await expect(reviewRender(intruder, render.id, "REJECTED", "x")).rejects.toMatchObject(
+      NOT_FOUND,
+    );
+    await expect(
+      publishShort(intruder, { renderId: render.id, title: "Nope", description: "Nope" }),
+    ).rejects.toMatchObject(NOT_FOUND);
+
+    // Media route decisions: owner can fetch, the intruder and a same-workspace
+    // Read Only user cannot.
+    const readOnly = await ws.actor([Role.READ_ONLY], "ro");
+    const targets: [string, string][] = [
+      ["capture", capA],
+      ["thumb", cutA],
+      ["render", render.id],
+      ["bundle", render.id],
+      ["cover", render.id],
+    ];
+    for (const [kind, id] of targets) {
+      expect(await resolveMediaTarget(owner, kind, id)).not.toBeNull();
+      expect(await resolveMediaTarget(intruder, kind, id)).toBeNull();
+      expect(await resolveMediaTarget(readOnly, kind, id)).toBeNull();
+    }
+    expect(await resolveMediaTarget(owner, "unknown", capA)).toBeNull();
+
+    // Exports are workspace-scoped: the intruder's exports carry none of it.
+    for (const type of ["content", "claims", "sources"] as const) {
+      const mine = JSON.parse((await buildExport(owner, type, "json")).body) as { rows: unknown[] };
+      const theirs = JSON.parse((await buildExport(intruder, type, "json")).body) as {
+        rows: unknown[];
+      };
+      expect(theirs.rows).toHaveLength(0);
+      if (type !== "sources") expect(mine.rows.length).toBeGreaterThan(0);
+    }
+    const audit = (await buildExport(intruder, "audit", "json")).body;
+    expect(audit).not.toContain(capA);
+  });
 });

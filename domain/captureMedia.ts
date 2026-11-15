@@ -120,7 +120,10 @@ export async function attachCaptureMedia(actor: Actor, raw: z.input<typeof attac
     })
     .catch(async (e: unknown) => {
       // Lost a concurrent-ingest race: remove the copied file, report cleanly.
-      await storage.remove(storagePath).catch(() => undefined);
+      // ...unless the winner ingested this very file (double submit): then the
+      // stored copy is theirs and must stay.
+      const owned = await prisma.captureMedia.findFirst({ where: { storagePath } });
+      if (!owned) await storage.remove(storagePath).catch(() => undefined);
       if (typeof e === "object" && e !== null && (e as { code?: string }).code === "P2002") {
         throw precondition("This capture or file was just ingested by someone else");
       }

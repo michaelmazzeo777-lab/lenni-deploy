@@ -3,9 +3,8 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { getActor } from "@/lib/auth/context";
-import { can } from "@/lib/permissions";
-import { prisma } from "@/lib/db";
 import { getAssetStorage } from "@/lib/storage/local-provider";
+import { resolveMediaTarget } from "@/domain/mediaAccess";
 
 // Authenticated, workspace-scoped streaming of locally stored media (source
 // captures, highlight thumbnails, rendered masters, review bundles). Supports
@@ -21,41 +20,14 @@ const TYPES: Record<string, string> = {
   ".zip": "application/zip",
 };
 
-async function resolve(kind: string, id: string, workspaceId: string) {
-  if (kind === "capture") {
-    const m = await prisma.captureMedia.findUnique({ where: { captureSessionId: id } });
-    return m?.workspaceId === workspaceId ? { path: m.storagePath } : null;
-  }
-  if (kind === "thumb") {
-    const c = await prisma.highlightCandidate.findUnique({ where: { id } });
-    return c?.workspaceId === workspaceId && c.thumbnailPath ? { path: c.thumbnailPath } : null;
-  }
-  if (kind === "render" || kind === "bundle" || kind === "cover") {
-    const r = await prisma.shortsRender.findUnique({ where: { id } });
-    // Only local renders have a bundle; mock renders are placeholders.
-    if (r?.workspaceId !== workspaceId || !r.bundlePath || r.status === "REJECTED") return null;
-    if (kind === "render") return { path: r.storagePath };
-    if (kind === "cover") return { path: `${path.dirname(r.storagePath)}/cover.jpg` };
-    return { path: r.bundlePath, download: `leonida-short-${r.id}.zip` };
-  }
-  return null;
-}
-
 export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ kind: string; id: string }> },
 ) {
   const actor = await getActor();
   if (!actor) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
-  if (
-    !can(actor, "capture.review") &&
-    !can(actor, "ai.generate") &&
-    !can(actor, "capture.submit")
-  ) {
-    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
-  }
   const { kind, id } = await ctx.params;
-  const target = await resolve(kind, id, actor.workspaceId);
+  const target = await resolveMediaTarget(actor, kind, id);
   if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const abs = getAssetStorage().absolutePath(target.path);
