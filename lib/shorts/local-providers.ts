@@ -6,6 +6,8 @@ import { AUDIO_EXT, resolveIngestFile } from "@/lib/media/ingest";
 import {
   LOUDNESS_TARGET_LUFS,
   LOUDNORM_MEASURE,
+  TRUE_PEAK_MAX_DB,
+  TRUE_PEAK_TARGET_DB,
   detectSilences,
   loudnormApply,
   measureLoudness,
@@ -374,20 +376,31 @@ export class LocalFfmpegCompositorProvider implements VideoCompositorProvider {
         ],
         { cwd: dir },
       );
-      // loudnorm switches to dynamic gain when a linear gain would break the
-      // peak ceiling, and on short clips that lands low. Measure what was
-      // encoded; if it is off target, encode the audio once more with the
-      // missing gain behind a peak limiter. The picture is copied untouched.
-      const miss = LOUDNESS_TARGET_LUFS - (await measureLoudness(out)).integratedLufs;
-      if (Math.abs(miss) > 0.5) {
-        const fixed = path.join(dir, "out2.mp4");
+      // Two things move the encoded audio off its targets: loudnorm lands low
+      // on short clips, and the AAC encoder can lift true peaks about 2 dB
+      // above what loudnorm set. So measure the encoded master and, while it
+      // misses the loudness target or the peak ceiling, encode the audio again
+      // with the missing gain behind a peak limiter (three tries at most). The
+      // picture is copied untouched. QA still makes the final judgement.
+      const first = out;
+      let gainDb = 0;
+      let limitDb = TRUE_PEAK_TARGET_DB;
+      for (let pass = 1; pass <= 3; pass++) {
+        const got = await measureLoudness(out);
+        const miss = LOUDNESS_TARGET_LUFS - got.integratedLufs;
+        const over = Math.max(0, got.truePeakDb - (TRUE_PEAK_MAX_DB - 0.3));
+        if (Math.abs(miss) <= 0.5 && over === 0) break;
+        if (Math.abs(miss) > 0.5) gainDb += miss;
+        limitDb -= over + 0.2;
+        const limit = Math.pow(10, limitDb / 20).toFixed(3);
+        out = path.join(dir, `out${pass}.mp4`);
         await ffmpeg(
           [
             ...inputs,
             "-i",
-            out,
+            first,
             "-filter_complex",
-            `${chain},volume=${miss.toFixed(2)}dB,alimiter=limit=0.794:level=false[au]`,
+            `${chain},volume=${gainDb.toFixed(2)}dB,alimiter=limit=${limit}:level=false[au]`,
             "-map",
             `${vo + 1}:v`,
             "-map",
@@ -404,11 +417,10 @@ export class LocalFfmpegCompositorProvider implements VideoCompositorProvider {
             "48000",
             "-movflags",
             "+faststart",
-            fixed,
+            out,
           ],
           { cwd: dir },
         );
-        out = fixed;
       }
       const probe = await probeVideo(out);
       if (probe.width !== w || probe.height !== h || !probe.audioCodec) {

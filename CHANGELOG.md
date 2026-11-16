@@ -95,6 +95,13 @@ Not promoted: the Studio of record stays at `dd82a4a`. Full record: `docs/COMPLE
 - **Migration** `20261116043000_media_jobs_qa_review`: additive only (five enums, nullable or
   defaulted columns, one table).
 
+### Found by the acceptance run and the first real production, and fixed
+
+- **Loudness landing low on short clips.** loudnorm falls back to dynamic gain when a linear gain would break the peak ceiling; a short fixture render came out at -17.1 LUFS and the QA gate refused it.
+- **AAC encoder lifting true peaks.** On the real Demo 001 narration the encoder raised true peak from -1.5 dBFS (what loudnorm set) to +0.3 dBFS; the QA gate refused that render too.
+- The compositor now measures the encoded master and, while it misses the loudness target or the peak ceiling, encodes the audio again with the missing gain behind a peak limiter (three tries at most; the picture is copied untouched). QA still makes the final judgement.
+- `tests/production/demo-001.spec.ts` + `playwright.production.config.ts`: a repeatable, re-runnable script that produces Demonstration Video 001 (rebuilt) through the Studio screens as the Editor and Producer demo accounts. It never signs in as the Owner and never approves, rejects or publishes.
+
 ## Not changed
 
 - No public-site, auth, RBAC, approval or audit behavior was altered.
