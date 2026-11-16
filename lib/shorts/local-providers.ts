@@ -4,9 +4,11 @@ import path from "node:path";
 import { ffmpeg, meanVolumeDb, probeDurationSec, probeVideo, run } from "@/lib/media/ffmpeg";
 import { AUDIO_EXT, resolveIngestFile } from "@/lib/media/ingest";
 import {
+  LOUDNESS_TARGET_LUFS,
   LOUDNORM_MEASURE,
   detectSilences,
   loudnormApply,
+  measureLoudness,
   parseLoudnormJson,
 } from "@/lib/media/audio-qa";
 import { compareScript, cuesFromComparison } from "@/lib/media/align";
@@ -338,8 +340,9 @@ export class LocalFfmpegCompositorProvider implements VideoCompositorProvider {
         { cwd: dir },
       );
       const measured = parseLoudnormJson(pass1.stderr);
-      const audio = `${mix},${loudnormApply(measured)}[au]`;
-      const out = path.join(dir, "out.mp4");
+      const chain = `${mix},${loudnormApply(measured)}`;
+      const audio = `${chain}[au]`;
+      let out = path.join(dir, "out.mp4");
       await ffmpeg(
         [
           ...inputs,
@@ -371,6 +374,42 @@ export class LocalFfmpegCompositorProvider implements VideoCompositorProvider {
         ],
         { cwd: dir },
       );
+      // loudnorm switches to dynamic gain when a linear gain would break the
+      // peak ceiling, and on short clips that lands low. Measure what was
+      // encoded; if it is off target, encode the audio once more with the
+      // missing gain behind a peak limiter. The picture is copied untouched.
+      const miss = LOUDNESS_TARGET_LUFS - (await measureLoudness(out)).integratedLufs;
+      if (Math.abs(miss) > 0.5) {
+        const fixed = path.join(dir, "out2.mp4");
+        await ffmpeg(
+          [
+            ...inputs,
+            "-i",
+            out,
+            "-filter_complex",
+            `${chain},volume=${miss.toFixed(2)}dB,alimiter=limit=0.794:level=false[au]`,
+            "-map",
+            `${vo + 1}:v`,
+            "-map",
+            "[au]",
+            "-t",
+            String(dur),
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "160k",
+            "-ar",
+            "48000",
+            "-movflags",
+            "+faststart",
+            fixed,
+          ],
+          { cwd: dir },
+        );
+        out = fixed;
+      }
       const probe = await probeVideo(out);
       if (probe.width !== w || probe.height !== h || !probe.audioCodec) {
         throw new Error(`Render validation failed: got ${probe.width}x${probe.height}`);
