@@ -11,7 +11,7 @@ import {
   reviewAssignment,
   recordRelease,
 } from "@/domain/contributors";
-import { createShot, submitCapture, reviewCapture } from "@/domain/capture";
+import { createShot, submitCapture, reviewCapture, startGraphicsSession } from "@/domain/capture";
 import {
   createVisualBrief,
   approveVisualPrompt,
@@ -160,6 +160,19 @@ export async function submitCaptureAction(fd: FormData) {
       targetsShorts: bool(fd, "targetsShorts"),
       supersedesId: opt(fd, "supersedesId"),
     });
+    revalidatePath(`/studio/content/${id}`);
+  } catch (e) {
+    to = `${to}&error=${encodeURIComponent(errMsg(e))}`;
+  }
+  redirect(to);
+}
+
+export async function startGraphicsSessionAction(fd: FormData) {
+  const actor = await requireActor();
+  const id = s(fd, "contentId");
+  let to = `/studio/content/${id}?tab=production`;
+  try {
+    await startGraphicsSession(actor, id);
     revalidatePath(`/studio/content/${id}`);
   } catch (e) {
     to = `${to}&error=${encodeURIComponent(errMsg(e))}`;

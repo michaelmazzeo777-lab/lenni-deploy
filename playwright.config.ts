@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = 3100;
 const BASE_URL = `http://localhost:${PORT}`;
 // Second server: same build and database, but with the real local Shorts
-// providers, for tests/e2e/local-media.spec.ts.
+// providers, for tests/e2e/local-media.spec.ts and explainer.spec.ts.
 const LOCAL_PORT = 3101;
 const LOCAL_URL = `http://localhost:${LOCAL_PORT}`;
 // The browser suite RESEEDS (wipes) its database. It used to fall back to the
@@ -46,7 +46,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: /local-media\.spec/,
+      testIgnore: /(local-media|explainer)\.spec/,
       use: {
         ...devices["Desktop Chrome"],
         // The environment pre-installs a Chromium build that differs from this
@@ -58,7 +58,7 @@ export default defineConfig({
     },
     {
       name: "local-media",
-      testMatch: /local-media\.spec/,
+      testMatch: /(local-media|explainer)\.spec/,
       use: {
         ...devices["Desktop Chrome"],
         baseURL: LOCAL_URL,

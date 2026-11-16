@@ -65,6 +65,36 @@ Full completion record: `docs/LOCAL_STUDIO_COMPLETION.md`.
 - No code changed. The verified `LOCAL_STUDIO_COMPLETE` baseline remains commit `2f43873`
   (tag `local-studio-complete-2026-11-15`).
 
+## 2026-11-16 — Completion build (branch `build/completion-20261115`)
+
+Not promoted: the Studio of record stays at `dd82a4a`. Full record: `docs/COMPLETION_BUILD.md`.
+
+- **Explainer workflow.** A production session with no footage (`CaptureSession.kind = GRAPHICS`),
+  an operator script whose lines carry their title cards, and a card generator
+  (`lib/media/cards.ts`) with a native layout for 16:9 and for 9:16. No capture review, media
+  ingest or highlight cut is involved; at least one linked, current claim is required.
+- **Narration QA** (`lib/media/qa.ts`, `audio-qa.ts`, `align.ts`, `transcribe.ts`): clipping,
+  leading silence, dead air inside a line, cut-off ending, local transcription against the
+  script (whisper.cpp), captions against real speech onsets. A failing narration is not recorded.
+- **Voice properties** recorded with each narration (synthetic or not, voice name, licence note).
+  Recorded narration gets its caption times from the transcript instead of text length.
+- **Render**: two-pass loudness normalization to -16 LUFS; long lines split into captions that
+  fit the frame; 9:16 captions inside the player-safe area; a native vertical source now fills
+  the frame instead of being raised 140 px.
+- **Render QA** on the finished file: loudness and true peak, narration under every line,
+  transcription against the script, caption timing, black frames, every card and caption
+  visibly in the picture, plus a contact sheet. A failing master is deleted and not recorded.
+- **Jobs** (`domain/mediaJobs.ts`, table `MediaJob`): one row per distinct request, duplicate
+  prevention, one automatic retry of a failed media process, recorded failures, retry from the
+  screen, takeover of an abandoned run.
+- **Review states**: `ShortsRender.reviewState` (`PENDING_MIKE_REVIEW`, `MIKE_APPROVED`,
+  `REJECTED`; `RENDERED` and `QA_CHECKED` are timestamped in `qaJson.stateHistory`), media class
+  (`ENGINEERING_FIXTURE`, `ILLUSTRATIVE_DRAFT`, `GAMEPLAY_CAPTURE`) and truthful burned-in labels.
+  `approveRenderVersion` is Owner-only and bound to the file's SHA-256. Publish gates only got
+  stricter: illustrative drafts and unapproved files are refused in addition to fixtures.
+- **Migration** `20261116043000_media_jobs_qa_review`: additive only (five enums, nullable or
+  defaulted columns, one table).
+
 ## Not changed
 
 - No public-site, auth, RBAC, approval or audit behavior was altered.

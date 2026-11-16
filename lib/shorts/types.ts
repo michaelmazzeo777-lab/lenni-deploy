@@ -46,6 +46,12 @@ export interface TTSResult {
   duckingCurve: { timestampSec: number; gainDb: number }[];
   cues?: CaptionCue[]; // caption timing, when the provider can supply it
   isFixture?: boolean; // true = not a publishable narration (e.g. system voice)
+  // What the voice is. Recorded with the narration, shown in review.
+  isSynthetic?: boolean;
+  voiceName?: string;
+  voiceLicenseNote?: string;
+  // How the caption times were obtained.
+  cueTiming?: "EXACT" | "TRANSCRIPT_ALIGNED" | "APPROXIMATE";
 }
 
 export interface TTSProvider {
@@ -64,6 +70,8 @@ export interface RenderResult {
   frameRate: number;
   renderCostUsd: number;
   coverJpg?: Buffer;
+  // First-pass loudness measurement used for normalization (local compositor).
+  loudnorm?: Record<string, string>;
 }
 
 export type RenderFormat = "9:16" | "16:9";
@@ -81,7 +89,9 @@ export interface VideoCompositorProvider {
     clip?: { startSec: number; durationSec: number };
     cues?: CaptionCue[];
     format?: RenderFormat;
-    fixtureLabel?: string; // burned in when any input is a fixture
+    fixtureLabel?: string; // burned-in label saying what the picture and voice are
+    // Explainer: no source footage; the picture is Studio-generated title cards.
+    cards?: { cards: { label: string; value: string; note: string }[]; startsSec: number[] };
   }): Promise<RenderResult>;
 }
 

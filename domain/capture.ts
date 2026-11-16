@@ -88,6 +88,44 @@ export async function submitCapture(actor: Actor, raw: z.input<typeof submitSche
   return capture;
 }
 
+// Starts an explainer: a production session with no footage, whose picture is
+// the Studio's own title cards. Nothing was captured, so there is no capture
+// review, media ingest or highlight cut; the claim gate and the review of the
+// finished render still apply. One per content item (asking again returns it).
+export async function startGraphicsSession(actor: Actor, contentId: string) {
+  require_(actor, "capture.submit");
+  const content = await prisma.contentItem.findFirst({
+    where: { id: contentId, workspaceId: actor.workspaceId },
+  });
+  if (!content) throw notFound("Content item not found");
+  const existing = await prisma.captureSession.findFirst({
+    where: { contentId, kind: "GRAPHICS" },
+  });
+  if (existing) return existing;
+  const session = await prisma.captureSession.create({
+    data: {
+      contentId,
+      kind: "GRAPHICS",
+      platform: "None - original graphics",
+      gameVersion: "n/a",
+      hudVisible: false,
+      targetsShorts: true,
+      fileReference: "studio-title-cards",
+      status: CaptureStatus.SUBMITTED,
+      submittedBy: actor.userId,
+    },
+  });
+  await writeAudit({
+    workspaceId: actor.workspaceId,
+    actorId: actor.userId,
+    action: "capture.graphics_session_started",
+    entityType: "ContentItem",
+    entityId: contentId,
+    metadata: { sessionId: session.id },
+  });
+  return session;
+}
+
 const reviewSchema = z.object({
   captureId: z.string(),
   decision: z.enum(["APPROVED", "RETAKE_REQUESTED", "REJECTED", "BLOCKED"]),

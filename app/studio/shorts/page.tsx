@@ -8,8 +8,26 @@ import {
   synthesizeVoiceoverAction,
   renderShortAction,
   reviewRenderAction,
+  approveRenderVersionAction,
   publishShortAction,
 } from "@/app/studio/shorts-actions";
+
+interface QaView {
+  verified?: boolean;
+  checks?: { name: string; status: string; detail: string }[];
+  measurements?: { loudness?: { integratedLufs: number; truePeakDb: number }; wer?: number | null };
+  humanValidation?: string[];
+}
+const MEDIA_CLASS: Record<string, string> = {
+  ENGINEERING_FIXTURE: "ENGINEERING FIXTURE",
+  ILLUSTRATIVE_DRAFT: "ILLUSTRATIVE DRAFT — not gameplay",
+  GAMEPLAY_CAPTURE: "GAMEPLAY CAPTURE",
+};
+const REVIEW_STATE: Record<string, string> = {
+  PENDING_MIKE_REVIEW: "PENDING MIKE REVIEW",
+  MIKE_APPROVED: "MIKE APPROVED",
+  REJECTED: "REJECTED",
+};
 
 export const metadata = { title: "Shorts pipeline — Field Guide Studio" };
 export const dynamic = "force-dynamic";
@@ -22,12 +40,13 @@ export default async function ShortsPage({
   const actor = await requireStudioActor();
   const { error } = await searchParams;
 
-  const [captures, scripts] = await Promise.all([
+  const [captures, scripts, failedJobs] = await Promise.all([
     prisma.captureSession.findMany({
       where: {
         content: { workspaceId: actor.workspaceId },
         targetsShorts: true,
-        status: "APPROVED",
+        // Gameplay captures must be approved; an explainer session has no footage to review.
+        OR: [{ status: "APPROVED" }, { kind: "GRAPHICS" }],
       },
       include: {
         content: true,
@@ -48,9 +67,18 @@ export default async function ShortsPage({
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
+    prisma.mediaJob.findMany({
+      where: { workspaceId: actor.workspaceId, status: "FAILED" },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+    }),
   ]);
+  // The latest failure per narration (script) or render (voiceover + format).
+  const failed = (subjectId: string, label: string) =>
+    failedJobs.find((j) => j.subjectId === subjectId && j.label === label);
 
   const mayGenerate = can(actor, "ai.generate");
+  const mayApprove = can(actor, "shorts.approve");
   const mayReview = can(actor, "capture.review");
   const mayPublish = can(actor, "shorts.publish");
 
@@ -111,7 +139,36 @@ export default async function ShortsPage({
                   <td className="muted">{c.platform}</td>
                   <td className="muted">{c.shortsScripts.length}</td>
                   <td>
-                    {mayGenerate && scriptP !== "mock" ? (
+                    {c.kind === "GRAPHICS" ? (
+                      c.shortsScripts.some((sc) => sc.status === "VALID") ? (
+                        <span className="muted">Explainer scripted.</span>
+                      ) : mayGenerate && scriptP !== "mock" ? (
+                        <details>
+                          <summary>Write explainer script (title cards)</summary>
+                          <form action={draftShortsScriptAction}>
+                            <input type="hidden" name="captureSessionId" value={c.id} />
+                            <p className="muted" style={{ fontSize: "0.78rem" }}>
+                              Each line is what the narrator says, then its title card:{" "}
+                              <code>spoken sentence || LABEL :: STATEMENT :: note</code>. Write
+                              words as they should be spoken.
+                            </p>
+                            <label htmlFor={`xhook-${c.id}`}>Hook (with its card)</label>
+                            <input id={`xhook-${c.id}`} name="hookText" required />
+                            <label htmlFor={`xlines-${c.id}`}>
+                              Explainer lines (one per line, each with its card)
+                            </label>
+                            <textarea id={`xlines-${c.id}`} name="lines" rows={6} required />
+                            <div style={{ marginTop: 8 }}>
+                              <button type="submit" className="secondary">
+                                Save explainer script ({scriptP})
+                              </button>
+                            </div>
+                          </form>
+                        </details>
+                      ) : (
+                        <span className="muted">Needs the local pipeline.</span>
+                      )
+                    ) : mayGenerate && scriptP !== "mock" ? (
                       // A cut that already has a script is not offered again.
                       c.highlights.filter(
                         (h) => !c.shortsScripts.some((sc) => sc.highlightCandidateId === h.id),
@@ -188,6 +245,12 @@ export default async function ShortsPage({
               : ""}
           </p>
 
+          {!script.voiceover && failed(script.id, "Narration") ? (
+            <p className="error" role="alert" style={{ fontSize: "0.82rem" }}>
+              Narration failed (attempt {failed(script.id, "Narration")!.attempts}):{" "}
+              {failed(script.id, "Narration")!.lastError}
+            </p>
+          ) : null}
           {script.status === "VALID" && !script.voiceover && mayGenerate ? (
             <form action={synthesizeVoiceoverAction} className="row" style={{ gap: 8 }}>
               <input type="hidden" name="scriptId" value={script.id} />
@@ -201,7 +264,8 @@ export default async function ShortsPage({
                 </select>
               ) : null}
               <button type="submit" className="secondary">
-                Synthesize voiceover ({ttsP})
+                {failed(script.id, "Narration") ? "Retry voiceover" : "Synthesize voiceover"} (
+                {ttsP})
               </button>
             </form>
           ) : null}
@@ -209,6 +273,9 @@ export default async function ShortsPage({
           {script.voiceover ? (
             <div className="muted" style={{ fontSize: "0.82rem" }}>
               Voiceover: {script.voiceover.assetPath} ({script.voiceover.durationSec}s)
+              {script.voiceover.voiceName
+                ? ` · ${script.voiceover.voiceName}${script.voiceover.isSynthetic ? " (synthetic)" : ""}`
+                : ""}
               {/* Re-rendering is allowed when every previous render was
                   rejected (the regenerate path); hidden only while a render
                   is pending review or already approved. */}
@@ -223,7 +290,11 @@ export default async function ShortsPage({
                     <input type="hidden" name="voiceoverId" value={script.voiceover!.id} />
                     <input type="hidden" name="format" value={format} />
                     <button type="submit" className="secondary">
-                      {script.renders.some((r) => r.format === format) ? "Re-render" : "Render"}
+                      {failed(script.voiceover!.id, `Render ${format}`)
+                        ? "Retry render"
+                        : script.renders.some((r) => r.format === format)
+                          ? "Re-render"
+                          : "Render"}
                       {local ? ` ${format}` : ""} ({videoP})
                     </button>
                   </form>
@@ -231,6 +302,23 @@ export default async function ShortsPage({
               )}
             </div>
           ) : null}
+          {script.voiceover
+            ? ["9:16", "16:9"]
+                .map((format) => ({
+                  format,
+                  job: failed(script.voiceover!.id, `Render ${format}`),
+                }))
+                .filter(
+                  (x) =>
+                    x.job &&
+                    !script.renders.some((r) => r.format === x.format && r.status !== "REJECTED"),
+                )
+                .map((x) => (
+                  <p key={x.format} className="error" role="alert" style={{ fontSize: "0.82rem" }}>
+                    Render {x.format} failed (attempt {x.job!.attempts}): {x.job!.lastError}
+                  </p>
+                ))
+            : null}
 
           {script.renders.map((r) => (
             <div
@@ -254,10 +342,32 @@ export default async function ShortsPage({
                 >
                   {r.status}
                 </span>
-                {r.isFixture ? (
+                {r.mediaClass === "ILLUSTRATIVE_DRAFT" ? (
+                  <>
+                    {" "}
+                    <span className="badge UNVERIFIED">{MEDIA_CLASS[r.mediaClass]}</span>{" "}
+                    <span className="badge LEAKED">never publishable</span>
+                  </>
+                ) : r.isFixture ? (
                   <>
                     {" "}
                     <span className="badge LEAKED">FIXTURE — never publishable</span>
+                  </>
+                ) : null}
+                {r.reviewState ? (
+                  <>
+                    {" "}
+                    <span
+                      className={`badge ${
+                        r.reviewState === "MIKE_APPROVED"
+                          ? "CONFIRMED"
+                          : r.reviewState === "REJECTED"
+                            ? "LEAKED"
+                            : "UNVERIFIED"
+                      }`}
+                    >
+                      {REVIEW_STATE[r.reviewState] ?? r.reviewState}
+                    </span>
                   </>
                 ) : null}
                 {r.publication?.status === "PUBLISHED" ? (
@@ -289,11 +399,64 @@ export default async function ShortsPage({
                     </div>
                     <div>
                       <a href={`/studio/media/bundle/${r.id}`}>
-                        Download review bundle (MP4, SRT, transcript, cover, manifest)
+                        Download review bundle (MP4, SRT, transcript, cover, manifest
+                        {r.qaJson ? ", QA report, contact sheet" : ""})
                       </a>
                     </div>
+                    {r.qaJson ? (
+                      <div style={{ marginTop: 6 }}>
+                        <div>
+                          <strong>Automatic QA:</strong>{" "}
+                          {(r.qaJson as QaView).verified
+                            ? "all checks passed"
+                            : "passed, with checks that could not be run"}{" "}
+                          · <a href={`/studio/media/contact/${r.id}`}>contact sheet</a> ·{" "}
+                          <a href={`/studio/media/qa/${r.id}`}>full report</a>
+                        </div>
+                        <ul style={{ margin: "4px 0", paddingLeft: 18 }}>
+                          {((r.qaJson as QaView).checks ?? []).map((c) => (
+                            <li key={c.name}>
+                              {c.status} — {c.name}: {c.detail}
+                            </li>
+                          ))}
+                        </ul>
+                        <div>
+                          <strong>Still needs a person:</strong>{" "}
+                          {((r.qaJson as QaView).humanValidation ?? []).join("; ")}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
+              ) : null}
+
+              {r.reviewState === "PENDING_MIKE_REVIEW" && mayApprove ? (
+                <form
+                  action={approveRenderVersionAction}
+                  className="row"
+                  style={{ gap: 8, marginTop: 6 }}
+                >
+                  <input type="hidden" name="renderId" value={r.id} />
+                  <label htmlFor={`sha-${r.id}`} style={{ margin: 0 }}>
+                    Owner approval of this exact file — type the first 8 characters of its SHA-256
+                  </label>
+                  <input
+                    id={`sha-${r.id}`}
+                    name="checksumPrefix"
+                    autoComplete="off"
+                    pattern="[0-9a-fA-F]{8,64}"
+                    required
+                    style={{ width: 140 }}
+                  />
+                  <button type="submit">Approve this version</button>
+                </form>
+              ) : null}
+              {r.reviewState === "MIKE_APPROVED" ? (
+                <p className="muted" style={{ fontSize: "0.78rem", margin: "6px 0 0" }}>
+                  Owner approved file <code>{r.approvedChecksum?.slice(0, 12)}…</code> on{" "}
+                  {r.approvedAt?.toISOString().slice(0, 16).replace("T", " ")} UTC. Approval is
+                  internal; nothing here publishes.
+                </p>
               ) : null}
 
               {r.status === "PENDING" && mayReview ? (
@@ -310,7 +473,12 @@ export default async function ShortsPage({
                 </form>
               ) : null}
 
-              {r.status === "CLEAN" && !r.publication && mayPublish && !r.isFixture ? (
+              {r.status === "CLEAN" &&
+              !r.publication &&
+              mayPublish &&
+              !r.isFixture &&
+              r.mediaClass !== "ILLUSTRATIVE_DRAFT" &&
+              (!r.reviewState || r.reviewState === "MIKE_APPROVED") ? (
                 <form action={publishShortAction} style={{ marginTop: 6 }}>
                   <input type="hidden" name="renderId" value={r.id} />
                   <label htmlFor={`title-${r.id}`}>Title</label>

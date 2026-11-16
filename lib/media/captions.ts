@@ -152,3 +152,115 @@ export function validateCaptionContract(input: CaptionContractInput): {
   }
   return { cueCount: cues.length, lastCueEndSec: prevEnd };
 }
+
+// ---- On-screen caption geometry -------------------------------------------
+// Captions are burned in by the compositor. These numbers are the single
+// source for where they go, how much text one caption may hold, and which
+// pixels QA inspects. 9:16 keeps captions above the bottom interface zone of
+// a Shorts player and clear of the buttons down its right edge.
+
+export interface CaptionStyle {
+  size: number;
+  marginV: number; // distance of the caption block's bottom edge from the frame bottom
+  marginH: number; // left and right margin
+  maxLines: number;
+  frameW: number;
+  frameH: number;
+}
+
+export const CAPTION_STYLE: Record<RenderFormat, CaptionStyle> = {
+  "16:9": { size: 54, marginV: 70, marginH: 70, maxLines: 2, frameW: 1920, frameH: 1080 },
+  "9:16": { size: 64, marginV: 430, marginH: 120, maxLines: 3, frameW: 1080, frameH: 1920 },
+};
+
+/** Characters that fit on one caption line (bold Helvetica Neue, generous advance). */
+export function captionCharsPerLine(format: RenderFormat): number {
+  const s = CAPTION_STYLE[format];
+  return Math.floor((s.frameW - 2 * s.marginH) / (s.size * 0.6));
+}
+
+/** Most characters a single on-screen caption may carry. */
+export const captionMaxChars = (format: RenderFormat) =>
+  captionCharsPerLine(format) * CAPTION_STYLE[format].maxLines - 4;
+
+/** Lines a caption will occupy when wrapped at word boundaries. */
+export function captionLineCount(text: string, format: RenderFormat): number {
+  const max = captionCharsPerLine(format);
+  let lines = 0;
+  let cur = 0;
+  for (const word of text.trim().split(/\s+/).filter(Boolean)) {
+    if (cur > 0 && cur + 1 + word.length > max) {
+      lines++;
+      cur = word.length;
+    } else cur = cur > 0 ? cur + 1 + word.length : word.length;
+    if (word.length > max) lines += Math.ceil(word.length / max) - 1;
+  }
+  return cur > 0 ? lines + 1 : lines;
+}
+
+/** Centre strip of the caption block: captions are centred, the attribution line is not. */
+export function captionBand(format: RenderFormat): { x: number; y: number; w: number; h: number } {
+  const s = CAPTION_STYLE[format];
+  const h = Math.round(s.size * 1.25 * s.maxLines) + 20;
+  return { x: s.frameW / 2 - 200, y: s.frameH - s.marginV - h + 10, w: 400, h };
+}
+
+export interface Cue {
+  startSec: number;
+  endSec: number;
+  text: string;
+}
+
+/**
+ * Splits narration lines that are too long for one on-screen caption into
+ * consecutive captions, breaking at punctuation where possible. A piece gets
+ * the share of its line's time that matches its share of the characters. The
+ * first piece keeps the line's start, so line-level sync is unchanged.
+ */
+export function chunkCues(cues: Cue[], format: RenderFormat): Cue[] {
+  const max = captionMaxChars(format);
+  const out: Cue[] = [];
+  for (const cue of cues) {
+    const text = cue.text.trim().replace(/\s+/g, " ");
+    if (text.length <= max) {
+      out.push({ ...cue, text });
+      continue;
+    }
+    const pieces = splitBalanced(text.split(" "), max);
+    const total = pieces.reduce((a, p) => a + p.length, 0);
+    let t = cue.startSec;
+    for (const [i, piece] of pieces.entries()) {
+      const end =
+        i === pieces.length - 1
+          ? cue.endSec
+          : t + ((cue.endSec - cue.startSec) * piece.length) / total;
+      out.push({ startSec: t, endSec: end, text: piece });
+      t = end;
+    }
+  }
+  return out;
+}
+
+/**
+ * Splits words into the fewest pieces that each fit `max` characters, aiming
+ * for pieces of similar length and preferring to break after punctuation, so
+ * a caption never ends with one stranded word.
+ */
+function splitBalanced(words: string[], max: number): string[] {
+  const text = words.join(" ");
+  if (text.length <= max || words.length < 2) return [text];
+  const target = text.length / Math.ceil(text.length / max);
+  let best = 1;
+  let bestCost = Infinity;
+  let len = 0;
+  for (let i = 1; i < words.length; i++) {
+    len += words[i - 1]!.length + (i > 1 ? 1 : 0);
+    if (len > max) break;
+    const cost = Math.abs(len - target) - (/[,.;:!?]$/.test(words[i - 1]!) ? target * 0.35 : 0);
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = i;
+    }
+  }
+  return [words.slice(0, best).join(" "), ...splitBalanced(words.slice(best), max)];
+}

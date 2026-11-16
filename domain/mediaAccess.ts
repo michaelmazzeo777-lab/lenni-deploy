@@ -35,13 +35,21 @@ export async function resolveMediaTarget(
     const c = await prisma.highlightCandidate.findUnique({ where: { id } });
     return c?.workspaceId === workspaceId && c.thumbnailPath ? { path: c.thumbnailPath } : null;
   }
-  if (kind === "render" || kind === "bundle" || kind === "cover") {
+  if (
+    kind === "render" ||
+    kind === "bundle" ||
+    kind === "cover" ||
+    kind === "contact" ||
+    kind === "qa"
+  ) {
     const r = await prisma.shortsRender.findUnique({ where: { id } });
     // Only local renders have a bundle; mock renders are placeholders, and a
     // rejected render's bytes are purged.
     if (r?.workspaceId !== workspaceId || !r.bundlePath || r.status === "REJECTED") return null;
     if (kind === "render") return { path: r.storagePath };
     if (kind === "cover") return { path: `${path.dirname(r.storagePath)}/cover.jpg` };
+    if (kind === "contact") return { path: `${path.dirname(r.storagePath)}/contact.jpg` };
+    if (kind === "qa") return { path: `${path.dirname(r.storagePath)}/qa.json` };
     return { path: r.bundlePath, download: `leonida-short-${r.id}.zip` };
   }
   return null;

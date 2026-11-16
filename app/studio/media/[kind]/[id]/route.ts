@@ -18,6 +18,7 @@ const TYPES: Record<string, string> = {
   ".webm": "video/webm",
   ".jpg": "image/jpeg",
   ".zip": "application/zip",
+  ".json": "application/json",
 };
 
 export async function GET(

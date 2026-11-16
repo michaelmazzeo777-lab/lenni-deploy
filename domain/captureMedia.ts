@@ -63,6 +63,9 @@ export async function attachCaptureMedia(actor: Actor, raw: z.input<typeof attac
   if (capture.flagLeaked || capture.status === "BLOCKED") {
     throw precondition("Blocked or leaked-flagged captures cannot have media attached");
   }
+  if (capture.kind === "GRAPHICS") {
+    throw precondition("An explainer session has no footage; its picture is generated title cards");
+  }
   if (capture.media) throw precondition("This capture already has media attached");
   // A synthetic fixture is always INTERNAL_FIXTURE and nothing else may claim to be.
   const fixtureMethod = input.captureMethod === "SYNTHETIC_FIXTURE";

@@ -28,7 +28,8 @@ export default async function CapturesPage({
 
   const [captures, files] = await Promise.all([
     prisma.captureSession.findMany({
-      where: { content: { workspaceId: actor.workspaceId } },
+      // Explainer sessions have no footage to ingest; they live on the Shorts page.
+      where: { content: { workspaceId: actor.workspaceId }, kind: "GAMEPLAY" },
       include: {
         content: true,
         media: true,

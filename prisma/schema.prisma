@@ -847,6 +847,9 @@ model CaptureSession {
   fileReference         String?
   flagLeaked            Boolean       @default(false)
   targetsShorts         Boolean       @default(false)
+  // GRAPHICS = an explainer built from Studio-generated title cards. It has no
+  // footage, so it needs no capture review, media ingest or highlight cut.
+  kind                  CaptureKind   @default(GAMEPLAY)
   status                CaptureStatus @default(SUBMITTED)
   reviewNotes           String?
   submittedBy           String
@@ -1035,6 +1038,9 @@ model ShortsScript {
   status             AIValidationStatus
   // Approved highlight cut this script is built from (local pipeline only).
   highlightCandidateId String?
+  // Title cards for a GRAPHICS session: { label, value, note }[] in narration
+  // order (hook first). Null for gameplay scripts.
+  cardsJson          Json?
   createdBy          String
   createdAt          DateTime           @default(now())
 
@@ -1056,6 +1062,11 @@ model ShortsVoiceover {
   cuesJson       Json? // { startSec, endSec, text }[] caption timing (local providers)
   // Fixture narration (e.g. macOS system voice) is never publishable.
   isFixture      Boolean  @default(false)
+  // What the voice is, recorded separately from the publish taint above.
+  isSynthetic    Boolean  @default(false)
+  voiceName      String?
+  voiceLicenseNote String?
+  qaJson         Json? // narration QA: clipping, silence, transcription, sync
   createdBy      String
   createdAt      DateTime @default(now())
 
@@ -1079,6 +1090,16 @@ model ShortsRender {
   checksumSha256 String?
   bundlePath    String? // review bundle zip (local providers)
   manifestJson  Json? // provenance: source timecodes, rights, hashes, settings
+  // What the picture is (separate from who approved it).
+  mediaClass    MediaClass?
+  // Stored lifecycle for locally rendered drafts. Automation stops at
+  // PENDING_MIKE_REVIEW; MIKE_APPROVED needs an Owner action on this exact file.
+  reviewState   RenderReviewState?
+  qaJson        Json? // recorded QA results for this file
+  idempotencyKey String? // hash of the real inputs; see MediaJob
+  approvedChecksum String?
+  approvedBy    String?
+  approvedAt    DateTime?
   // Human quality gate: PENDING until an Owner/Editor approves (CLEAN) or
   // rejects (REJECTED). Publish requires CLEAN.
   status        QuarantineStatus @default(PENDING)
@@ -1187,4 +1208,60 @@ model HighlightCandidate {
   shortsScripts  ShortsScript[]
 
   @@index([captureSessionId, status])
+}
+
+enum CaptureKind {
+  GAMEPLAY
+  GRAPHICS
+}
+
+// What a render's picture is. An approved master is a review state, not a class.
+enum MediaClass {
+  ENGINEERING_FIXTURE // synthetic test footage
+  ILLUSTRATIVE_DRAFT // Studio-generated graphics, not gameplay
+  GAMEPLAY_CAPTURE // operator's own capture
+}
+
+enum RenderReviewState {
+  RENDERED
+  QA_CHECKED
+  PENDING_MIKE_REVIEW
+  MIKE_APPROVED
+  REJECTED
+}
+
+enum MediaJobKind {
+  NARRATION
+  RENDER
+}
+
+enum MediaJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+// One row per distinct narration/render request (same real inputs = same key).
+// Prevents duplicates, bounds retries and keeps a record of failures.
+model MediaJob {
+  id             String         @id @default(cuid())
+  workspaceId    String
+  kind           MediaJobKind
+  idempotencyKey String
+  subjectId      String // scriptId (NARRATION) or voiceoverId (RENDER)
+  label          String // e.g. "Render 9:16"
+  status         MediaJobStatus @default(QUEUED)
+  attempts       Int            @default(0) // total attempts across retries
+  lastError      String?
+  failureJson    Json? // QA report or diagnostics of the last failed attempt
+  resultId       String? // ShortsVoiceover.id or ShortsRender.id
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdBy      String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([workspaceId, kind, idempotencyKey])
+  @@index([workspaceId, subjectId])
 }

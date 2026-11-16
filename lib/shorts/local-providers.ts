@@ -3,6 +3,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { ffmpeg, meanVolumeDb, probeDurationSec, probeVideo, run } from "@/lib/media/ffmpeg";
 import { AUDIO_EXT, resolveIngestFile } from "@/lib/media/ingest";
+import {
+  LOUDNORM_MEASURE,
+  detectSilences,
+  loudnormApply,
+  parseLoudnormJson,
+} from "@/lib/media/audio-qa";
+import { compareScript, cuesFromComparison } from "@/lib/media/align";
+import { transcribe } from "@/lib/media/transcribe";
+import { CAPTION_STYLE } from "@/lib/media/captions";
+import { buildCardsGraph } from "@/lib/media/cards";
 import type {
   CaptionCue,
   RenderFormat,
@@ -86,13 +96,23 @@ export class LocalSayFixtureTTSProvider implements TTSProvider {
       const inputs: string[] = [];
       let t = 0;
       for (const [i, text] of segments.entries()) {
-        const seg = path.join(dir, `s${i}.aiff`);
+        const raw = path.join(dir, `s${i}.aiff`);
         await run("say", [
           ...(voice && voice !== "default" ? ["-v", voice] : []),
           "-o",
-          seg,
+          raw,
           "--",
           text,
+        ]);
+        // The system voice leaves up to ~0.4s of silence before the first
+        // word. Trim it so each caption starts with its speech.
+        const seg = path.join(dir, `s${i}.wav`);
+        await ffmpeg([
+          "-i",
+          raw,
+          "-af",
+          "silenceremove=start_periods=1:start_duration=0:start_threshold=-45dB",
+          seg,
         ]);
         const d = await probeDurationSec(seg);
         cues.push({ startSec: t, endSec: t + d, text });
@@ -123,6 +143,11 @@ export class LocalSayFixtureTTSProvider implements TTSProvider {
         duckingCurve: [{ timestampSec: 0, gainDb: -12 }],
         cues,
         isFixture: true,
+        isSynthetic: true,
+        voiceName: voice && voice !== "default" ? `macOS "${voice}"` : "macOS system default voice",
+        voiceLicenseNote:
+          "Apple system voice (synthetic). Licence for publication has not been reviewed.",
+        cueTiming: "EXACT",
       };
     });
   }
@@ -144,22 +169,41 @@ export class OperatorRecordingProvider implements TTSProvider {
       await ffmpeg(["-i", src, "-vn", "-ar", "48000", "-ac", "1", out]);
       await assertAudible(out);
       const durationSec = await probeDurationSec(out);
-      // No word timing for a recording: spread cues by text length.
-      // APPROXIMATE - the operator must check caption sync in review.
-      const total = segments.reduce((a, s) => a + s.length, 0) || 1;
-      let t = 0;
-      const cues = segments.map((text) => {
-        const d = (text.length / total) * durationSec;
-        const cue = { startSec: t, endSec: t + d, text };
-        t += d;
-        return cue;
-      });
+      // Caption times come from where each line's words are actually heard
+      // (local transcription), snapped to the nearest speech onset.
+      let cues: CaptionCue[] | null = null;
+      const heard = await transcribe(out);
+      if (heard.status === "OK") {
+        cues = cuesFromComparison(
+          segments,
+          compareScript(segments, heard.words),
+          durationSec,
+          await detectSilences(out, durationSec, { minSec: 0.15 }),
+        );
+      }
+      const cueTiming = cues ? "TRANSCRIPT_ALIGNED" : "APPROXIMATE";
+      if (!cues) {
+        // No transcript: spread cues by text length. APPROXIMATE - flagged for
+        // a human sync check in QA.
+        const total = segments.reduce((a, s) => a + s.length, 0) || 1;
+        let t = 0;
+        cues = segments.map((text) => {
+          const d = (text.length / total) * durationSec;
+          const cue = { startSec: t, endSec: t + d, text };
+          t += d;
+          return cue;
+        });
+      }
       return {
         audioBytes: await readFile(out),
         durationSec,
         duckingCurve: [{ timestampSec: 0, gainDb: -12 }],
         cues,
         isFixture: false,
+        isSynthetic: false,
+        voiceName: `Recording "${input.voiceProfileId}"`,
+        voiceLicenseNote: "Operator-supplied recording; rights attested by the operator.",
+        cueTiming,
       };
     });
   }
@@ -180,8 +224,7 @@ function buildAss(opts: {
   attributionText: string;
   fixtureLabel?: string;
 }): string {
-  const portrait = opts.height > opts.width;
-  const cap = portrait ? { size: 64, marginV: 430 } : { size: 54, marginV: 70 };
+  const cap = CAPTION_STYLE[opts.height > opts.width ? "9:16" : "16:9"];
   const end = assTime(opts.durationSec);
   const lines = [
     "[Script Info]",
@@ -192,7 +235,7 @@ function buildAss(opts: {
     "",
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV",
-    `Style: Caption,Helvetica Neue,${cap.size},&H00FFFFFF,&H00000000,&H80000000,1,1,5,1,2,70,70,${cap.marginV}`,
+    `Style: Caption,Helvetica Neue,${cap.size},&H00FFFFFF,&H00000000,&H80000000,1,1,5,1,2,${cap.marginH},${cap.marginH},${cap.marginV}`,
     "Style: Attribution,Helvetica Neue,30,&H00FFFFFF,&H00000000,&H80000000,0,1,2,0,1,40,40,40",
     "Style: Fixture,Helvetica Neue,34,&H00FFFFFF,&H000000FF,&H000000C0,1,3,6,0,8,40,40,60",
     "",
@@ -222,8 +265,8 @@ export class LocalFfmpegCompositorProvider implements VideoCompositorProvider {
 
   async render(input: Parameters<VideoCompositorProvider["render"]>[0]): Promise<RenderResult> {
     const { sourceVideoPath, voiceoverPath, clip } = input;
-    if (!sourceVideoPath || !voiceoverPath || !clip) {
-      throw new Error("Local render needs a source video, a narration track and a clip range");
+    if ((!sourceVideoPath && !input.cards) || !voiceoverPath || !clip) {
+      throw new Error("Local render needs a picture source, a narration track and a clip range");
     }
     const format = input.format ?? "9:16";
     const { w, h } = SIZE[format];
@@ -241,30 +284,65 @@ export class LocalFfmpegCompositorProvider implements VideoCompositorProvider {
           fixtureLabel: input.fixtureLabel,
         }),
       );
-      // 9:16: blurred fill behind the full-width source (no HUD is cropped
-      // away). 16:9: fit and pad.
-      const video =
-        format === "9:16"
-          ? `[0:v]fps=30,split[a][b];` +
-            `[a]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=24:2,eq=brightness=-0.12[bg];` +
-            `[b]scale=${w}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2-140,ass=c.ass[v]`
-          : `[0:v]fps=30,scale=${w}:${h}:force_original_aspect_ratio=decrease,` +
-            `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,ass=c.ass[v]`;
-      // Game audio ducked 12 dB under the narration, then loudness-normalized.
-      const audio = input.sourceHasAudio
-        ? `[0:a]volume=-12dB[g];[1:a]apad[n];[g][n]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11[au]`
-        : `[1:a]apad,loudnorm=I=-16:TP=-1.5:LRA=11[au]`;
+      // Inputs: explainers have no footage (the picture is generated in the
+      // graph), so the narration is input 0; otherwise footage 0, narration 1.
+      const footage = sourceVideoPath
+        ? ["-ss", String(clip.startSec), "-t", String(dur), "-i", sourceVideoPath]
+        : [];
+      const inputs = [...footage, "-i", voiceoverPath];
+      const vo = sourceVideoPath ? 1 : 0;
+
+      let video: string;
+      if (input.cards) {
+        // Native layout for each frame shape; see lib/media/cards.ts.
+        video =
+          (await buildCardsGraph(dir, {
+            format,
+            cards: input.cards.cards,
+            startsSec: input.cards.startsSec,
+            durationSec: dur,
+          })) + `;[cards]ass=c.ass[v]`;
+      } else if (format === "9:16") {
+        // Landscape footage: full width over a blurred fill, raised 140px so
+        // captions clear it (no HUD is cropped away). Footage that already
+        // fills the frame (native vertical) is centred, not raised.
+        video =
+          `[0:v]fps=30,split[a][b];` +
+          `[a]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=24:2,eq=brightness=-0.12[bg];` +
+          `[b]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg];` +
+          `[bg][fg]overlay=(W-w)/2:'(H-h)/2-140*lt(h\\,H-280)',ass=c.ass[v]`;
+      } else {
+        video =
+          `[0:v]fps=30,scale=${w}:${h}:force_original_aspect_ratio=decrease,` +
+          `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,ass=c.ass[v]`;
+      }
+      // Game audio ducked 12 dB under the narration. Loudness is normalized in
+      // two passes: measure the mix, then apply a linear gain to the target.
+      const mix =
+        input.sourceHasAudio && sourceVideoPath
+          ? `[0:a]volume=-12dB[g];[${vo}:a]apad[n];[g][n]amix=inputs=2:duration=first:normalize=0`
+          : `[${vo}:a]apad`;
+      const pass1 = await ffmpeg(
+        [
+          ...inputs,
+          "-filter_complex",
+          `${mix},${LOUDNORM_MEASURE}[au]`,
+          "-map",
+          "[au]",
+          "-t",
+          String(dur),
+          "-f",
+          "null",
+          "-",
+        ],
+        { cwd: dir },
+      );
+      const measured = parseLoudnormJson(pass1.stderr);
+      const audio = `${mix},${loudnormApply(measured)}[au]`;
       const out = path.join(dir, "out.mp4");
       await ffmpeg(
         [
-          "-ss",
-          String(clip.startSec),
-          "-t",
-          String(dur),
-          "-i",
-          sourceVideoPath,
-          "-i",
-          voiceoverPath,
+          ...inputs,
           "-filter_complex",
           `${video};${audio}`,
           "-map",
@@ -316,6 +394,7 @@ export class LocalFfmpegCompositorProvider implements VideoCompositorProvider {
         frameRate: 30,
         renderCostUsd: 0,
         coverJpg: await readFile(cover),
+        loudnorm: measured as unknown as Record<string, string>,
       };
     });
   }

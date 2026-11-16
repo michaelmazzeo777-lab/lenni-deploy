@@ -7,6 +7,7 @@ import {
   createShotAction,
   submitCaptureAction,
   reviewCaptureAction,
+  startGraphicsSessionAction,
 } from "@/app/studio/production-actions";
 
 export async function ProductionTab({ actor, contentId }: { actor: Actor; contentId: string }) {
@@ -142,6 +143,19 @@ export async function ProductionTab({ actor, contentId }: { actor: Actor; conten
               ) : null}
             </tbody>
           </table>
+
+          {maySubmit ? (
+            <form action={startGraphicsSessionAction} style={{ marginTop: 12 }}>
+              <input type="hidden" name="contentId" value={contentId} />
+              <button type="submit" className="secondary">
+                Start an explainer (original graphics, no footage)
+              </button>
+              <p className="muted" style={{ fontSize: "0.78rem", margin: "4px 0 0" }}>
+                For a video made of title cards and narration. The script, narration and renders are
+                done on the Shorts pipeline page; at least one linked claim is required.
+              </p>
+            </form>
+          ) : null}
 
           {maySubmit ? (
             <details style={{ marginTop: 12 }}>

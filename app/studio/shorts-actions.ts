@@ -9,6 +9,7 @@ import {
   synthesizeVoiceover,
   renderShort,
   reviewRender,
+  approveRenderVersion,
   publishShort,
 } from "@/domain/shorts";
 
@@ -75,6 +76,13 @@ export async function reviewRenderAction(fd: FormData) {
       s(fd, "notes") || undefined,
     ),
   );
+}
+
+// The Owner's approval of one exact file: the form sends the SHA-256 prefix
+// the approver typed, never a value filled in by the page.
+export async function approveRenderVersionAction(fd: FormData) {
+  const actor = await requireActor();
+  await run(() => approveRenderVersion(actor, s(fd, "renderId"), s(fd, "checksumPrefix")));
 }
 
 export async function publishShortAction(fd: FormData) {

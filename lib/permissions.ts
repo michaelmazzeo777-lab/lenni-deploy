@@ -39,6 +39,7 @@ export type Capability =
   | "storage.scan"
   | "prompt.manage"
   | "shorts.publish"
+  | "shorts.approve"
   | "audit.read";
 
 const MATRIX: Record<Capability, Role[]> = {
@@ -89,6 +90,8 @@ const MATRIX: Record<Capability, Role[]> = {
   // Publishing a Short to YouTube is an external action; Owner-only, mirroring
   // publication.publish. (Generation/review reuse ai.generate / capture.review.)
   "shorts.publish": [Role.OWNER],
+  // The Owner's approval of one exact rendered file (domain/shorts.ts).
+  "shorts.approve": [Role.OWNER],
   "audit.read": [
     Role.OWNER,
     Role.EDITOR,
