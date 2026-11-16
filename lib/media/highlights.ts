@@ -20,6 +20,10 @@ export interface SignalBin {
   luma: number; // mean luma 0-255
   cuts: number; // scene changes detected in the bin
   rmsDb: number; // audio RMS, dBFS (-120 when silent / no audio)
+  // Experimental inputs (Gemini v3.1). extractSignals() does NOT measure these,
+  // so they are absent for real video; only hand-built bins carry them.
+  lumaVariance?: number; // spatial luma variance
+  voiceCallout?: boolean; // operator marked a spoken callout in this bin
 }
 
 export interface Candidate {
@@ -109,8 +113,20 @@ const AUDIO_FLOOR_DB = -50;
 // Pure ranking over signal bins (unit-testable without ffmpeg).
 export function rankHighlights(
   bins: SignalBin[],
-  opts: { maxCandidates?: number; minScore?: number; maxWindowSec?: number } = {},
+  opts: {
+    maxCandidates?: number;
+    minScore?: number;
+    maxWindowSec?: number;
+    /**
+     * EXPERIMENTAL, off by default. Enables the Gemini v3.1 animated-menu filter
+     * and voice-callout boost. Not used by the Studio: it has only been measured
+     * on hand-written signal bins, and it discards genuine low-contrast,
+     * low-motion footage (see tests/unit/highlight-experimental.test.ts).
+     */
+    experimentalMenuFilter?: boolean;
+  } = {},
 ): Candidate[] {
+  const experimental = opts.experimentalMenuFilter === true;
   const maxCandidates = opts.maxCandidates ?? 8;
   const minScore = opts.minScore ?? 0.15;
   const maxWindow = opts.maxWindowSec ?? 30;
@@ -141,7 +157,14 @@ export function rankHighlights(
   );
 
   const parts = bins.map((b, i) => {
-    const dead = b.luma < BLACK_LUMA ? "black" : b.motion < STILL_MOTION ? "still" : null;
+    const menuTrap =
+      experimental &&
+      b.lumaVariance !== undefined &&
+      b.lumaVariance < 6 &&
+      b.motion < 1.5 &&
+      b.cuts === 0;
+    const dead =
+      b.luma < BLACK_LUMA ? "black" : b.motion < STILL_MOTION || menuTrap ? "still" : null;
     const prior = bins.slice(Math.max(0, i - 3), i).map((p) => Math.max(AUDIO_FLOOR_DB, p.rmsDb));
     const priorMean = prior.length ? prior.reduce((a, c) => a + c, 0) / prior.length : b.rmsDb;
     const p = {
@@ -158,7 +181,8 @@ export function rankHighlights(
       : WEIGHTS.motion * p.motion +
         WEIGHTS.audioLevel * p.audioLevel +
         WEIGHTS.audioOnset * p.audioOnset +
-        WEIGHTS.sceneCuts * p.sceneCuts;
+        WEIGHTS.sceneCuts * p.sceneCuts +
+        (experimental && b.voiceCallout ? 0.15 : 0);
     return p;
   });
 

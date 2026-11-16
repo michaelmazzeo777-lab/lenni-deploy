@@ -6,8 +6,14 @@ const BASE_URL = `http://localhost:${PORT}`;
 // providers, for tests/e2e/local-media.spec.ts.
 const LOCAL_PORT = 3101;
 const LOCAL_URL = `http://localhost:${LOCAL_PORT}`;
-const DB_URL =
-  process.env.E2E_DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/fieldguide";
+// The browser suite RESEEDS (wipes) its database. It used to fall back to the
+// development database when E2E_DATABASE_URL was unset; now it refuses to run.
+const DB_URL = process.env.E2E_DATABASE_URL ?? "";
+if (!DB_URL) {
+  throw new Error(
+    "E2E_DATABASE_URL is not set. The browser tests wipe their database; point it at a disposable one.",
+  );
+}
 
 function serverEnv(baseUrl: string) {
   return {

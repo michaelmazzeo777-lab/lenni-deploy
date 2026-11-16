@@ -13,7 +13,13 @@ import {
 } from "@/lib/shorts";
 import { AIValidationStatus, QuarantineStatus, PublicationStatus } from "@prisma/client";
 import { createHash } from "node:crypto";
-import { run } from "@/lib/media/ffmpeg";
+import { run, probeVideo, meanVolumeDb } from "@/lib/media/ffmpeg";
+import {
+  CaptionError,
+  SHORTS_RIGHTS_SENSITIVE_SEC,
+  durationCeilingSec,
+  validateCaptionContract,
+} from "@/lib/media/captions";
 import type { CaptionCue, RenderFormat } from "@/lib/shorts";
 import { toCanonicalRecord, blocksProduction } from "@/domain/canonicalTaxonomy";
 
@@ -27,7 +33,6 @@ import { toCanonicalRecord, blocksProduction } from "@/domain/canonicalTaxonomy"
 // same gates apply, plus: real ingested media with cleared rights, an APPROVED
 // highlight cut, an audible narration, and a fixture taint that blocks publish.
 
-const DURATION_CEILING_SEC = 60;
 const FIXTURE_LABEL = "INTERNAL TECHNICAL FIXTURE - NOT GAMEPLAY - NOT FOR PUBLICATION";
 
 async function loadCapture(actor: Actor, captureSessionId: string) {
@@ -111,7 +116,7 @@ export async function draftShortsScript(
   const result = await provider
     .analyzeAndDraft({
       videoReference: capture.fileReference,
-      durationCeilingSec: DURATION_CEILING_SEC,
+      durationCeilingSec: durationCeilingSec("9:16"),
       operatorScript: { hookText: opts.hookText ?? "", lines: opts.lines ?? [] },
       highlights,
     })
@@ -282,8 +287,9 @@ export async function renderShort(
   const cues = (voiceover.cuesJson as CaptionCue[] | null) ?? [];
   const inSec = cut.trimStartSec ?? cut.startSec;
   const outSec = cut.trimEndSec ?? cut.endSec;
-  // Long enough for the narration, never past the source or the Shorts ceiling.
-  const ceiling = format === "9:16" ? DURATION_CEILING_SEC : 600;
+  // Long enough for the narration, never past the source or the ceiling for the
+  // format (Shorts platform limit or a stricter editorial limit; see captions.ts).
+  const ceiling = durationCeilingSec(format);
   const durationSec = Math.min(
     ceiling,
     media.durationSec,
@@ -294,8 +300,41 @@ export async function renderShort(
       `Narration (${voiceover.durationSec.toFixed(1)}s) does not fit the ${durationSec.toFixed(1)}s available; shorten the script`,
     );
   }
+  // A Short over one minute is blocked on YouTube by any Content ID claim, so
+  // the music gate is re-checked here (UNCLEARED media was refused above).
+  if (
+    format === "9:16" &&
+    durationSec > SHORTS_RIGHTS_SENSITIVE_SEC &&
+    capture.containsLicensedMusic
+  ) {
+    throw precondition("A Short longer than 60s cannot use footage with licensed music");
+  }
   const startSec = Math.max(0, Math.min(inSec, media.durationSec - durationSec));
   const isFixture = media.rightsStatus === "INTERNAL_FIXTURE" || voiceover.isFixture;
+
+  // Caption and transcript files are checked before any render time is spent.
+  const sections = voiceover.script.sectionsJson as { text: string }[];
+  const srt = cues
+    .filter((c) => c.startSec < durationSec)
+    .map(
+      (c, i) =>
+        `${i + 1}\n${srtTime(c.startSec)} --> ${srtTime(Math.min(c.endSec, durationSec))}\n${c.text}\n`,
+    )
+    .join("\n");
+  const transcript = [voiceover.script.hookText, ...sections.map((s) => s.text)].join("\n") + "\n";
+  let captionCheck: { cueCount: number; lastCueEndSec: number };
+  try {
+    captionCheck = validateCaptionContract({
+      srt,
+      transcript,
+      clipDurationSec: durationSec,
+      narrationDurationSec: voiceover.durationSec,
+      format,
+    });
+  } catch (e) {
+    if (e instanceof CaptionError) throw precondition(`Captions rejected: ${e.message}`);
+    throw e;
+  }
 
   const result = await provider
     .render({
@@ -316,16 +355,24 @@ export async function renderShort(
 
   // Review bundle: master + captions + transcript + cover + provenance manifest.
   const dir = `shorts/render/${voiceoverId}-${format.replace(":", "x")}-${Date.now()}`;
-  const sections = voiceover.script.sectionsJson as { text: string }[];
-  const srt = cues
-    .filter((c) => c.startSec < durationSec)
-    .map(
-      (c, i) =>
-        `${i + 1}\n${srtTime(c.startSec)} --> ${srtTime(Math.min(c.endSec, durationSec))}\n${c.text}\n`,
-    )
-    .join("\n");
-  const transcript = [voiceover.script.hookText, ...sections.map((s) => s.text)].join("\n") + "\n";
   const checksumSha256 = sha256(result.videoBytes);
+  // Inspect the file that was actually produced, not the request that made it.
+  await storage.write(`${dir}/master.mp4`, result.videoBytes);
+  const masterPath = storage.absolutePath(`${dir}/master.mp4`);
+  const probe = await probeVideo(masterPath);
+  const meanDb = await meanVolumeDb(masterPath);
+  const wanted = format === "9:16" ? "1080x1920" : "1920x1080";
+  if (
+    `${probe.width}x${probe.height}` !== wanted ||
+    probe.audioCodec === null ||
+    Math.abs(probe.durationSec - durationSec) > 1 ||
+    !(meanDb > -60)
+  ) {
+    await storage.remove(`${dir}/master.mp4`);
+    throw precondition(
+      `Rendered master failed inspection (${probe.width}x${probe.height}, ${probe.durationSec.toFixed(1)}s, audio ${probe.audioCodec ?? "none"} at ${meanDb} dB)`,
+    );
+  }
   const manifest = {
     status: isFixture ? "INTERNAL_TECHNICAL_FIXTURE" : "PENDING_HUMAN_REVIEW",
     publication: "PUBLICATION_BLOCKED",
@@ -370,6 +417,16 @@ export async function renderShort(
     script: { hookText: voiceover.script.hookText, sections: sections.map((s) => s.text) },
     attributionText,
     costUsd: result.renderCostUsd,
+    verification: {
+      captionCues: captionCheck.cueCount,
+      lastCueEndSec: captionCheck.lastCueEndSec,
+      probedDurationSec: probe.durationSec,
+      probedResolution: `${probe.width}x${probe.height}`,
+      videoCodec: probe.videoCodec,
+      audioCodec: probe.audioCodec,
+      meanVolumeDb: meanDb,
+      note: "File checks only. Audible speech and burned-in captions still need a human look.",
+    },
   };
   const files: [string, Buffer][] = [
     ["master.mp4", result.videoBytes],

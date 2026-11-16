@@ -449,6 +449,115 @@ describe("regressions for the review fixes", () => {
   });
 });
 
+describe("duration rules and caption contract on real renders", () => {
+  const LONG = {
+    hookText: "Internal technical fixture, long narration test.",
+    lines: [
+      "This narration is deliberately much longer than the few seconds that the editorial limit in this test allows for a vertical render.",
+      "It keeps going for a second full sentence so that the synthesized audio is clearly longer than the clip it would have to fit inside.",
+    ],
+  };
+  let longCap = "";
+  let longCut = "";
+
+  it("renders a 64-second 9:16 Short, validated and probed; music blocks it past 60s", async () => {
+    await makeFixture(FIXTURES[2]!, path.join(INGEST, "f.mp4"), 1);
+    const c = await capture();
+    longCap = c.id;
+    await attachCaptureMedia(owner, { captureSessionId: c.id, fileName: "f.mp4", ...fixtureMeta });
+    await analyzeHighlights(editor, c.id);
+    const cut = await prisma.highlightCandidate.findFirstOrThrow({
+      where: { captureSessionId: c.id },
+      orderBy: { rank: "asc" },
+    });
+    longCut = cut.id;
+    await reviewHighlight(editor, {
+      candidateId: cut.id,
+      decision: "APPROVED",
+      trimStartSec: 2,
+      trimEndSec: 66,
+    });
+    const script = await draftShortsScript(owner, c.id, {
+      highlightCandidateId: cut.id,
+      ...SCRIPT,
+    });
+    const vo = await synthesizeVoiceover(owner, script.id, "default");
+
+    await prisma.captureSession.update({
+      where: { id: c.id },
+      data: { containsLicensedMusic: true },
+    });
+    await expect(renderShort(owner, vo.id, "x")).rejects.toThrow(/longer than 60s.*licensed music/);
+    await prisma.captureSession.update({
+      where: { id: c.id },
+      data: { containsLicensedMusic: false },
+    });
+
+    const render = await renderShort(owner, vo.id, "Leonida Field Guide (test)");
+    const probe = await probeVideo(storage.absolutePath(render.storagePath));
+    expect([probe.width, probe.height]).toEqual([1080, 1920]);
+    expect(probe.durationSec).toBeGreaterThan(63.5);
+    expect(probe.durationSec).toBeLessThan(64.6);
+    expect(render.isFixture).toBe(true);
+    const manifest = render.manifestJson as {
+      verification: { captionCues: number; probedResolution: string; audioCodec: string };
+    };
+    expect(manifest.verification.captionCues).toBe(3);
+    expect(manifest.verification.probedResolution).toBe("1080x1920");
+    expect(manifest.verification.audioCodec).toBe("aac");
+    // The written files satisfy the same contract when read back from disk.
+    const dir = path.dirname(render.storagePath);
+    const { validateCaptionContract } = await import("@/lib/media/captions");
+    expect(
+      validateCaptionContract({
+        srt: (await storage.read(`${dir}/captions.srt`)).toString(),
+        transcript: (await storage.read(`${dir}/transcript.txt`)).toString(),
+        clipDurationSec: probe.durationSec,
+        format: "9:16",
+      }).cueCount,
+    ).toBe(3);
+  }, 240_000);
+
+  it("refuses a genuinely synthesized narration that overruns a stricter editorial limit; 16:9 is unaffected", async () => {
+    await makeFixture(FIXTURES[2]!, path.join(INGEST, "g.mp4"), 0.15);
+    const c = await capture();
+    await attachCaptureMedia(owner, { captureSessionId: c.id, fileName: "g.mp4", ...fixtureMeta });
+    await analyzeHighlights(editor, c.id);
+    const cut = await prisma.highlightCandidate.findFirstOrThrow({
+      where: { captureSessionId: c.id },
+      orderBy: { rank: "asc" },
+    });
+    await reviewHighlight(editor, { candidateId: cut.id, decision: "APPROVED" });
+    const script = await draftShortsScript(owner, c.id, { highlightCandidateId: cut.id, ...LONG });
+    const vo = await synthesizeVoiceover(owner, script.id, "default");
+    // Real audio from the TTS provider, measured, not a number written into the row.
+    const media = await prisma.captureMedia.findUniqueOrThrow({
+      where: { captureSessionId: c.id },
+    });
+    expect(vo.durationSec).toBeGreaterThan(media.durationSec);
+    const before = await prisma.shortsRender.count({ where: { voiceoverId: vo.id } });
+    await expect(renderShort(owner, vo.id, "x")).rejects.toThrow(/does not fit/);
+    await expect(renderShort(owner, vo.id, "x", "16:9")).rejects.toThrow(/does not fit/);
+    expect(await prisma.shortsRender.count({ where: { voiceoverId: vo.id } })).toBe(before);
+
+    // Same long narration on the 75s source: fits at 16:9, but not inside a 5s
+    // editorial Shorts limit, which must not leak into the 16:9 path.
+    const script2 = await draftShortsScript(owner, longCap, {
+      highlightCandidateId: longCut,
+      ...LONG,
+    });
+    const vo2 = await synthesizeVoiceover(owner, script2.id, "default");
+    process.env.SHORTS_EDITORIAL_MAX_SEC = "5";
+    try {
+      await expect(renderShort(owner, vo2.id, "x")).rejects.toThrow(/does not fit the 5\.0s/);
+      const wide = await renderShort(owner, vo2.id, "x", "16:9");
+      expect(wide.durationSec).toBeGreaterThan(60);
+    } finally {
+      delete process.env.SHORTS_EDITORIAL_MAX_SEC;
+    }
+  }, 240_000);
+});
+
 describe("workspace isolation for capture media, cuts, renders and exports", () => {
   it("another workspace's Owner can neither act on nor fetch this workspace's records", async () => {
     const other = await makeWorkspace();
