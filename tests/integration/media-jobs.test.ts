@@ -185,9 +185,14 @@ describe("media jobs", () => {
         spec(k, async () => ({ id: "y" }), false),
       ),
     ).rejects.toThrow(/already running/);
+    // A crashed runner is one whose heartbeat stopped (audit F02): an old
+    // start time alone no longer counts, since a long job keeps beating.
     await prisma.mediaJob.update({
       where: { id: row.id },
-      data: { startedAt: new Date(Date.now() - STALE_RUNNING_MS - 1000) },
+      data: {
+        startedAt: new Date(Date.now() - STALE_RUNNING_MS - 1000),
+        heartbeatAt: new Date(Date.now() - 60_000),
+      },
     });
     const taken = await runMediaJob(
       owner,
