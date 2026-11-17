@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { can } from "@/lib/permissions";
 import { Banner } from "@/app/_ui";
 import { approveRenderVersionAction, reviewRenderAction } from "@/app/studio/shorts-actions";
+import { approveSessionClipAction, reviewSessionClipAction } from "@/app/studio/clipper-actions";
 
 // LIBRARY and REVIEW: every rendered video that still exists, playable, with
 // what a reviewer needs beside it - evidence, asset rights, QA, approval state.
@@ -66,6 +67,12 @@ export default async function LibraryPage({
         },
       },
     },
+    orderBy: { createdAt: "desc" },
+    take: 60,
+  });
+  const sessionClips = await prisma.sessionClip.findMany({
+    where: { workspaceId: actor.workspaceId, bundlePath: { not: null } },
+    include: { captureSession: { include: { content: true } } },
     orderBy: { createdAt: "desc" },
     take: 60,
   });
@@ -259,6 +266,155 @@ export default async function LibraryPage({
                   What needs to change
                 </label>
                 <input id={`lib-notes-${r.id}`} name="notes" required style={{ minWidth: 260 }} />
+                <button type="submit" className="secondary">
+                  Request revision
+                </button>
+              </form>
+            ) : null}
+          </div>
+        );
+      })}
+
+      {sessionClips.length > 0 ? (
+        <>
+          <h2>Session clips</h2>
+          <p className="muted" style={{ fontSize: "0.82rem" }}>
+            Auto-selected moments from a long ingested session, confirmed with local speech-to-text.
+            Evidence for the selection is below each clip; it is not a gameplay claim.
+          </p>
+        </>
+      ) : null}
+      {sessionClips.map((c) => {
+        const sig = (c.signalsJson ?? {}) as {
+          reasons?: string[];
+          transcriptExcerpt?: string | null;
+        };
+        const qa = (c.qaJson ?? null) as Qa | null;
+        const gone = c.reviewState === "REJECTED";
+        return (
+          <div className="card" key={c.id} data-testid="library-clip-item">
+            <h2 style={{ marginBottom: 4 }}>{c.captureSession.content.workingTitle}</h2>
+            <p style={{ margin: 0 }}>
+              moment {c.rank} · {c.format} · {c.resolution} · {c.durationSec.toFixed(1)}s{" "}
+              <span
+                className={`badge ${c.reviewState === "MIKE_APPROVED" ? "CONFIRMED" : gone ? "LEAKED" : "UNVERIFIED"}`}
+              >
+                {STATE[c.reviewState ?? ""] ?? c.reviewState}
+              </span>{" "}
+              <span className="badge LEAKED">PUBLICATION BLOCKED</span>{" "}
+              <span className="badge RUMOR">RIGHTS OPEN — not reviewed</span>
+            </p>
+            {gone ? (
+              <p className="muted" style={{ fontSize: "0.85rem" }}>
+                Revision requested{c.reviewNotes ? `: ${c.reviewNotes}` : ""}. The file is no longer
+                served. Clip the session again from{" "}
+                <Link href="/studio/captures">Capture intake</Link>.
+              </p>
+            ) : (
+              <div
+                className="row"
+                style={{ gap: 16, alignItems: "flex-start", marginTop: 8, flexWrap: "wrap" }}
+              >
+                <div>
+                  <video
+                    controls
+                    preload="metadata"
+                    poster={`/studio/media/clip-cover/${c.id}`}
+                    style={{ width: c.format === "16:9" ? 420 : 220, background: "#000" }}
+                    src={`/studio/media/clip/${c.id}`}
+                  />
+                  <div className="muted" style={{ fontSize: "0.78rem" }}>
+                    Captions are burned into the picture.{" "}
+                    <a href={`/studio/media/clip-captions/${c.id}`}>Caption file (SRT)</a> ·{" "}
+                    <a href={`/studio/media/clip-bundle/${c.id}`}>review bundle</a>
+                  </div>
+                  <div className="muted" style={{ fontSize: "0.78rem" }}>
+                    SHA-256: <code>{c.checksumSha256}</code>
+                  </div>
+                </div>
+                <div style={{ fontSize: "0.82rem", flex: 1, minWidth: 320 }}>
+                  <details open>
+                    <summary>
+                      <strong>Moment evidence</strong>
+                    </summary>
+                    <ul style={{ margin: "4px 0 8px 18px" }}>
+                      <li>
+                        {c.startSec.toFixed(1)}s – {c.endSec.toFixed(1)}s, score{" "}
+                        {c.score.toFixed(2)}
+                      </li>
+                      {(sig.reasons ?? []).length ? (
+                        <li>{(sig.reasons ?? []).join("; ")}</li>
+                      ) : null}
+                      <li>
+                        transcript:{" "}
+                        {sig.transcriptExcerpt
+                          ? `"${sig.transcriptExcerpt}"`
+                          : "no speech detected"}
+                      </li>
+                    </ul>
+                  </details>
+                  <details open>
+                    <summary>
+                      <strong>Automatic QA</strong>:{" "}
+                      {qa
+                        ? (qa.checks ?? []).some((x) => x.status === "FAIL")
+                          ? "a check failed"
+                          : "all checks passed"
+                        : "not recorded"}
+                    </summary>
+                    <ul style={{ margin: "4px 0 8px 18px" }}>
+                      {(qa?.checks ?? []).map((x) => (
+                        <li key={x.name}>
+                          {x.status} — {x.name}: {x.detail}
+                        </li>
+                      ))}
+                    </ul>
+                    {qa?.humanValidation?.length ? (
+                      <p>Still needs a person: {qa.humanValidation.join("; ")}</p>
+                    ) : null}
+                  </details>
+                </div>
+              </div>
+            )}
+            {!gone && c.reviewState === "PENDING_MIKE_REVIEW" && mayApprove ? (
+              <form
+                action={approveSessionClipAction}
+                className="row"
+                style={{ gap: 8, marginTop: 8 }}
+              >
+                <input type="hidden" name="clipId" value={c.id} />
+                <label htmlFor={`clip-sha-${c.id}`} style={{ margin: 0 }}>
+                  Owner approval of this exact file — type the first 8 characters of its SHA-256
+                </label>
+                <input
+                  id={`clip-sha-${c.id}`}
+                  name="checksumPrefix"
+                  autoComplete="off"
+                  pattern="[0-9a-fA-F]{8,64}"
+                  required
+                  style={{ width: 140 }}
+                />
+                <button type="submit">Approve internally</button>
+              </form>
+            ) : null}
+            {c.reviewState === "MIKE_APPROVED" ? (
+              <p className="muted" style={{ fontSize: "0.78rem", margin: "6px 0 0" }}>
+                Owner approved file <code>{c.approvedChecksum?.slice(0, 12)}…</code>. Approval is
+                internal; nothing here publishes.
+              </p>
+            ) : null}
+            {!gone && c.reviewState === "PENDING_MIKE_REVIEW" && mayReview ? (
+              <form
+                action={reviewSessionClipAction}
+                className="row"
+                style={{ gap: 8, marginTop: 8 }}
+              >
+                <input type="hidden" name="clipId" value={c.id} />
+                <input type="hidden" name="decision" value="REJECTED" />
+                <label htmlFor={`clip-notes-${c.id}`} style={{ margin: 0 }}>
+                  What needs to change
+                </label>
+                <input id={`clip-notes-${c.id}`} name="notes" required style={{ minWidth: 260 }} />
                 <button type="submit" className="secondary">
                   Request revision
                 </button>

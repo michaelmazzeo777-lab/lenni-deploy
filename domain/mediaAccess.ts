@@ -59,5 +59,26 @@ export async function resolveMediaTarget(
     }
     return { path: r.bundlePath, download: `leonida-short-${r.id}.zip` };
   }
+  if (
+    kind === "clip" ||
+    kind === "clip-cover" ||
+    kind === "clip-captions" ||
+    kind === "clip-bundle" ||
+    kind === "clip-qa"
+  ) {
+    const c = await prisma.sessionClip.findUnique({ where: { id } });
+    if (c?.workspaceId !== workspaceId || !c.bundlePath || c.reviewState === "REJECTED")
+      return null;
+    if (kind === "clip") return { path: c.storagePath };
+    if (kind === "clip-cover") return { path: `${path.dirname(c.storagePath)}/cover.jpg` };
+    if (kind === "clip-qa") return { path: `${path.dirname(c.storagePath)}/qa.json` };
+    if (kind === "clip-captions") {
+      return {
+        path: `${path.dirname(c.storagePath)}/captions.srt`,
+        download: `captions-${c.id}.srt`,
+      };
+    }
+    return { path: c.bundlePath, download: `leonida-clip-${c.id}.zip` };
+  }
   return null;
 }

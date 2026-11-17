@@ -66,14 +66,14 @@ export function truthWindows(spec: FixtureSpec): { startSec: number; endSec: num
 }
 
 const SIZE = "1280x720";
-const VIDEO: Record<SegmentKind, string> = {
+export const VIDEO: Record<SegmentKind, string> = {
   calm: `gradients=size=${SIZE}:rate=30:speed=0.004:seed=7`,
   action: `life=size=320x180:rate=30:seed=3:ratio=0.35:mold=8:life_color=0xffcc33:death_color=0x102040,scale=${SIZE}:flags=neighbor`,
   quietAction: `life=size=320x180:rate=30:seed=9:ratio=0.3:mold=6:life_color=0x33ddff:death_color=0x201030,scale=${SIZE}:flags=neighbor`,
   loudMenu: `color=c=0x24303c:size=${SIZE}:rate=30`,
   black: `color=c=black:size=${SIZE}:rate=30`,
 };
-const AUDIO: Record<SegmentKind, string> = {
+export const AUDIO: Record<SegmentKind, string> = {
   calm: "anoisesrc=color=pink:amplitude=0.012:seed=1:sample_rate=48000",
   action: "anoisesrc=color=brown:amplitude=0.7:seed=2:sample_rate=48000",
   quietAction: "anoisesrc=color=pink:amplitude=0.012:seed=4:sample_rate=48000",

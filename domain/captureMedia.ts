@@ -10,7 +10,7 @@ import { notFound, precondition } from "@/lib/errors";
 import type { Actor } from "@/lib/auth/context";
 import { getAssetStorage } from "@/lib/storage/local-provider";
 import { probeVideo } from "@/lib/media/ffmpeg";
-import { resolveIngestFile, VIDEO_EXT } from "@/lib/media/ingest";
+import { resolveAnyIngestFile, VIDEO_EXT } from "@/lib/media/ingest";
 import {
   ANALYZER_VERSION,
   extractSignals,
@@ -33,6 +33,36 @@ async function loadCapture(actor: Actor, captureSessionId: string) {
     throw notFound("Capture session not found");
   }
   return capture;
+}
+
+// Ceilings for what may be ingested at all (any CaptureSession, including a
+// long clipper session): generous enough to never affect a normal short
+// gameplay clip, but a clear, named refusal for a mis-dropped huge file.
+export const MAX_SESSION_DURATION_SEC = 2 * 60 * 60;
+export const MAX_SESSION_SIZE_BYTES = 20 * 1024 * 1024 * 1024;
+const SUPPORTED_SESSION_CODECS = new Set(["h264", "hevc"]);
+
+export function sessionMediaProblems(
+  probe: Awaited<ReturnType<typeof probeVideo>>,
+  sizeBytes: number,
+): string[] {
+  const out: string[] = [];
+  if (probe.durationSec > MAX_SESSION_DURATION_SEC) {
+    out.push(
+      `duration ${(probe.durationSec / 3600).toFixed(2)}h exceeds the ${MAX_SESSION_DURATION_SEC / 3600}h limit`,
+    );
+  }
+  if (sizeBytes > MAX_SESSION_SIZE_BYTES) {
+    out.push(
+      `size ${(sizeBytes / 1024 ** 3).toFixed(1)}GB exceeds the ${MAX_SESSION_SIZE_BYTES / 1024 ** 3}GB limit`,
+    );
+  }
+  if (!SUPPORTED_SESSION_CODECS.has(probe.videoCodec)) {
+    out.push(
+      `video codec "${probe.videoCodec}" is not supported (allowed: ${[...SUPPORTED_SESSION_CODECS].join(", ")})`,
+    );
+  }
+  return out;
 }
 
 function sha256File(file: string): Promise<string> {
@@ -76,11 +106,17 @@ export async function attachCaptureMedia(actor: Actor, raw: z.input<typeof attac
 
   let source: string;
   let probe: Awaited<ReturnType<typeof probeVideo>>;
+  let sourceSizeBytes: number;
   try {
-    source = await resolveIngestFile(input.fileName, VIDEO_EXT);
+    source = await resolveAnyIngestFile(input.fileName, VIDEO_EXT);
+    sourceSizeBytes = (await stat(source)).size;
     probe = await probeVideo(source);
   } catch (e) {
     throw precondition(`Ingest rejected: ${e instanceof Error ? e.message : "unreadable file"}`);
+  }
+  const sessionProblems = sessionMediaProblems(probe, sourceSizeBytes);
+  if (sessionProblems.length) {
+    throw precondition(`Ingest rejected: ${sessionProblems.join("; ")}`);
   }
   const checksumSha256 = await sha256File(source);
   const duplicate = await prisma.captureMedia.findUnique({

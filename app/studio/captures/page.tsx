@@ -9,6 +9,10 @@ import {
   analyzeHighlightsAction,
   reviewHighlightAction,
 } from "@/app/studio/captures-actions";
+import { cancelSessionClipAction, startSessionClipAction } from "@/app/studio/clipper-actions";
+import { AutoRefresh } from "@/app/studio/_auto-refresh";
+import { recoverInterruptedSessionClipJobs } from "@/domain/sessionClip";
+import { clipperProblems } from "@/lib/clipper/engine";
 
 export const metadata = { title: "Capture intake — Field Guide Studio" };
 export const dynamic = "force-dynamic";
@@ -25,8 +29,11 @@ export default async function CapturesPage({
   const { error } = await searchParams;
   const maySubmit = can(actor, "capture.submit");
   const mayReview = can(actor, "capture.review");
+  // A clipper job whose process died with the Studio is closed here so it can be retried.
+  await recoverInterruptedSessionClipJobs(actor.workspaceId);
+  const clipperNotReady = clipperProblems();
 
-  const [captures, files] = await Promise.all([
+  const [captures, files, clipJobs, clipCounts] = await Promise.all([
     prisma.captureSession.findMany({
       // Explainer sessions have no footage to ingest; they live on the Shorts page.
       where: { content: { workspaceId: actor.workspaceId }, kind: "GAMEPLAY" },
@@ -39,7 +46,21 @@ export default async function CapturesPage({
       take: 50,
     }),
     listIngestFiles(VIDEO_EXT),
+    prisma.mediaJob.findMany({
+      where: { workspaceId: actor.workspaceId, kind: "SESSION_CLIP" },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+    }),
+    prisma.sessionClip.groupBy({
+      by: ["captureSessionId"],
+      where: { workspaceId: actor.workspaceId },
+      _count: { _all: true },
+    }),
   ]);
+  const clipJobFor = (captureSessionId: string) =>
+    clipJobs.find((j) => j.subjectId === captureSessionId);
+  const clipCountFor = (captureSessionId: string) =>
+    clipCounts.find((c) => c.captureSessionId === captureSessionId)?._count._all ?? 0;
 
   return (
     <div>
@@ -52,6 +73,7 @@ export default async function CapturesPage({
         never evidence for a gameplay claim. Nothing leaves this machine.
       </p>
       <Banner error={error} />
+      <AutoRefresh active={clipJobs.some((j) => j.status === "RUNNING")} />
 
       {captures.length === 0 ? <p className="muted">No capture sessions yet.</p> : null}
 
@@ -105,6 +127,102 @@ export default async function CapturesPage({
                 ) : (
                   <div>Approve the capture (Production tab) before analysis.</div>
                 )}
+
+                {mayReview && c.status === "APPROVED"
+                  ? (() => {
+                      const job = clipJobFor(c.id);
+                      const running = job?.status === "RUNNING";
+                      const count = clipCountFor(c.id);
+                      return (
+                        <div
+                          data-testid="clipper-panel"
+                          style={{
+                            borderTop: "1px solid var(--border)",
+                            paddingTop: 8,
+                            marginTop: 8,
+                          }}
+                        >
+                          <strong>Clip a session</strong>{" "}
+                          <span className="muted" style={{ fontSize: "0.78rem" }}>
+                            Shortlists moments from motion/audio/scene-cut signals, confirms each
+                            with local speech-to-text, then renders 16:9 and 9:16 with burned
+                            captions. Minutes for a long file; you can leave this page.
+                          </span>
+                          {job ? (
+                            <p style={{ margin: "6px 0" }}>
+                              <span
+                                className={`badge ${
+                                  job.status === "SUCCEEDED"
+                                    ? "CONFIRMED"
+                                    : job.status === "FAILED"
+                                      ? "LEAKED"
+                                      : "UNVERIFIED"
+                                }`}
+                              >
+                                {job.status}
+                              </span>{" "}
+                              <span style={{ fontSize: "0.85rem" }}>
+                                {running
+                                  ? (job.progress ?? "Working")
+                                  : job.status === "SUCCEEDED"
+                                    ? `Finished. ${count} clip file(s) in the Library.`
+                                    : (job.lastError ?? "")}
+                              </span>{" "}
+                              <span className="muted" style={{ fontSize: "0.78rem" }}>
+                                attempt {job.attempts}
+                              </span>
+                            </p>
+                          ) : null}
+                          {clipperNotReady.length > 0 ? (
+                            <p className="error" style={{ fontSize: "0.82rem" }}>
+                              Clipper not ready: {clipperNotReady.join("; ")}
+                            </p>
+                          ) : null}
+                          {running ? (
+                            <form action={cancelSessionClipAction} style={{ display: "inline" }}>
+                              <input type="hidden" name="jobId" value={job!.id} />
+                              <button type="submit" className="secondary">
+                                Cancel
+                              </button>
+                            </form>
+                          ) : clipperNotReady.length === 0 ? (
+                            <form action={startSessionClipAction} style={{ display: "inline" }}>
+                              <input type="hidden" name="captureSessionId" value={c.id} />
+                              <label
+                                htmlFor={`clip-n-${c.id}`}
+                                className="muted"
+                                style={{ fontSize: "0.78rem" }}
+                              >
+                                Clips
+                              </label>
+                              <input
+                                id={`clip-n-${c.id}`}
+                                name="n"
+                                type="number"
+                                min={1}
+                                max={20}
+                                defaultValue={8}
+                                style={{ width: 56 }}
+                              />
+                              <select
+                                name="cropMode"
+                                aria-label="Crop mode"
+                                defaultValue="center-crop"
+                              >
+                                <option value="center-crop">Center-weighted crop</option>
+                                <option value="blurred-fill">Blurred fill</option>
+                              </select>
+                              <button type="submit">
+                                {job && job.status !== "SUCCEEDED"
+                                  ? "Retry clip a session"
+                                  : "Clip a session"}
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      );
+                    })()
+                  : null}
               </div>
             </div>
           ) : maySubmit && !c.flagLeaked && c.status !== "BLOCKED" ? (

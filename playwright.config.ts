@@ -31,6 +31,16 @@ function serverEnv(baseUrl: string) {
 function providers(script: string, tts: string, video: string) {
   return { SHORTS_SCRIPT_PROVIDER: script, TTS_PROVIDER: tts, VIDEO_COMPOSITOR_PROVIDER: video };
 }
+// The clipper needs word-level timestamps (A3: never a mid-word cut), which
+// needs a real speech model. Forwarded explicitly, same reasoning as above -
+// not inherited from .env - so tests/e2e/clipper.spec.ts skips cleanly (never
+// a false pass) when the environment running this suite has none configured.
+function whisperEnv() {
+  const env: Record<string, string> = {};
+  if (process.env.WHISPER_MODEL_PATH) env.WHISPER_MODEL_PATH = process.env.WHISPER_MODEL_PATH;
+  if (process.env.WHISPER_CLI_PATH) env.WHISPER_CLI_PATH = process.env.WHISPER_CLI_PATH;
+  return env;
+}
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -46,7 +56,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: /(local-media|explainer|premium)\.spec/,
+      testIgnore: /(local-media|explainer|premium|clipper)\.spec/,
       use: {
         ...devices["Desktop Chrome"],
         // The environment pre-installs a Chromium build that differs from this
@@ -58,7 +68,7 @@ export default defineConfig({
     },
     {
       name: "local-media",
-      testMatch: /(local-media|explainer|premium)\.spec/,
+      testMatch: /(local-media|explainer|premium|clipper)\.spec/,
       use: {
         ...devices["Desktop Chrome"],
         baseURL: LOCAL_URL,
@@ -85,6 +95,7 @@ export default defineConfig({
         ...serverEnv(LOCAL_URL),
         ...providers("local-operator", "local-say-fixture", "local-ffmpeg"),
         CAPTURE_INGEST_DIR: "./.data/ingest-e2e",
+        ...whisperEnv(),
       },
     },
   ],

@@ -863,6 +863,7 @@ model CaptureSession {
   shortsScripts ShortsScript[]
   media         CaptureMedia?
   highlights    HighlightCandidate[]
+  sessionClips  SessionClip[]
 }
 
 // ---------- Visual production ----------
@@ -1234,6 +1235,7 @@ enum MediaJobKind {
   NARRATION
   RENDER
   PREMIUM_RENDER // both formats from the premium engine, run in the background
+  SESSION_CLIP // long-session clipper: shortlist, whisper, cut, both formats
 }
 
 enum MediaJobStatus {
@@ -1271,4 +1273,47 @@ model MediaJob {
 
   @@unique([workspaceId, kind, idempotencyKey])
   @@index([workspaceId, subjectId])
+}
+
+// ---------- Long-session clipper ----------
+// A moment auto-detected in a long ingested session (cheap signals, shortlisted,
+// then confirmed with local speech-to-text), rendered in both formats. No
+// script and no voiceover exist for this footage, so it does not fit
+// ShortsScript/ShortsVoiceover/ShortsRender; it reuses their review shape
+// (RenderReviewState, approval-by-file-hash) directly on its own row. One row
+// per format per moment, same convention as ShortsRender.
+model SessionClip {
+  id               String             @id @default(cuid())
+  workspaceId      String
+  captureSessionId String
+  jobId            String?
+  analysisRunId    String
+  rank             Int
+  startSec         Float
+  endSec           Float
+  peakSec          Float
+  score            Float
+  signalsJson      Json // cheap signals + transcript excerpt + word times (evidence)
+  format           String // "16:9" | "9:16"
+  storagePath      String
+  durationSec      Float
+  resolution       String
+  frameRate        Int
+  checksumSha256   String?
+  bundlePath       String?
+  manifestJson     Json?
+  mediaClass       MediaClass?
+  reviewState      RenderReviewState?
+  qaJson           Json?
+  reviewNotes      String?
+  reviewedBy       String?
+  approvedChecksum String?
+  approvedBy       String?
+  approvedAt       DateTime?
+  createdBy        String
+  createdAt        DateTime           @default(now())
+
+  captureSession CaptureSession @relation(fields: [captureSessionId], references: [id])
+
+  @@index([captureSessionId, analysisRunId, rank])
 }
