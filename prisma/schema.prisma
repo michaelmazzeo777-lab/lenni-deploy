@@ -228,25 +228,25 @@ model Workspace {
   timezone   String   @default("America/New_York")
   createdAt  DateTime @default(now())
 
-  users        User[]
-  roles        RoleAssignment[]
-  contentItems ContentItem[]
-  sources      Source[]
-  claims       Claim[]
-  generations  AIGeneration[]
-  auditEvents  AuditEvent[]
+  users           User[]
+  roles           RoleAssignment[]
+  contentItems    ContentItem[]
+  sources         Source[]
+  claims          Claim[]
+  generations     AIGeneration[]
+  auditEvents     AuditEvent[]
   promptTemplates PromptTemplate[]
 }
 
 model User {
-  id          String     @id @default(cuid())
-  workspaceId String
-  displayName String
-  email       String     @unique
+  id           String     @id @default(cuid())
+  workspaceId  String
+  displayName  String
+  email        String     @unique
   passwordHash String
-  status      UserStatus @default(ACTIVE)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
   workspace Workspace        @relation(fields: [workspaceId], references: [id])
   roles     RoleAssignment[]
@@ -308,28 +308,28 @@ model ContentItem {
   updatedAt      DateTime      @updatedAt
   deletedAt      DateTime?
 
-  workspace       Workspace              @relation(fields: [workspaceId], references: [id])
-  claims          ContentClaim[]
-  briefs          ContentBrief[]
-  scripts         ScriptVersion[]
-  assets          Asset[]
-  titleVariants   TitleVariant[]
-  thumbnails      ThumbnailVariant[]
-  approvals       Approval[]
-  publications    Publication[]
+  workspace        Workspace               @relation(fields: [workspaceId], references: [id])
+  claims           ContentClaim[]
+  briefs           ContentBrief[]
+  scripts          ScriptVersion[]
+  assets           Asset[]
+  titleVariants    TitleVariant[]
+  thumbnails       ThumbnailVariant[]
+  approvals        Approval[]
+  publications     Publication[]
   articleRevisions PublicArticleRevision[]
-  corrections     Correction[]
-  updateTasks     UpdateTask[]
-  analytics       AnalyticsSnapshot[]
-  experiments     PackagingExperiment[]
-  assignments     Assignment[]
-  shots           Shot[]
-  captureSessions CaptureSession[]
-  visualBriefs    VisualBrief[]
-  generations     AIGeneration[]
-  statusHistory   ContentStatusHistory[]
-  relationsFrom   ContentRelation[]      @relation("from")
-  relationsTo     ContentRelation[]      @relation("to")
+  corrections      Correction[]
+  updateTasks      UpdateTask[]
+  analytics        AnalyticsSnapshot[]
+  experiments      PackagingExperiment[]
+  assignments      Assignment[]
+  shots            Shot[]
+  captureSessions  CaptureSession[]
+  visualBriefs     VisualBrief[]
+  generations      AIGeneration[]
+  statusHistory    ContentStatusHistory[]
+  relationsFrom    ContentRelation[]       @relation("from")
+  relationsTo      ContentRelation[]       @relation("to")
 
   @@unique([workspaceId, slug])
 }
@@ -347,13 +347,13 @@ model ContentRelation {
 }
 
 model ContentStatusHistory {
-  id        String        @id @default(cuid())
-  contentId String
+  id         String         @id @default(cuid())
+  contentId  String
   fromStatus ContentStatus?
-  toStatus  ContentStatus
-  actorId   String
-  reason    String?
-  createdAt DateTime      @default(now())
+  toStatus   ContentStatus
+  actorId    String
+  reason     String?
+  createdAt  DateTime       @default(now())
 
   content ContentItem @relation(fields: [contentId], references: [id])
 }
@@ -361,57 +361,57 @@ model ContentStatusHistory {
 // ---------- Research ----------
 
 model Source {
-  id               String       @id @default(cuid())
-  workspaceId      String
-  title            String
-  publisher        String
-  url              String?
-  sourceClass      SourceClass
-  sourceType       String
-  publicationDate  DateTime?
-  retrievalDate    DateTime?
-  factualAsOfDate  DateTime?
+  id                String       @id @default(cuid())
+  workspaceId       String
+  title             String
+  publisher         String
+  url               String?
+  sourceClass       SourceClass
+  sourceType        String
+  publicationDate   DateTime?
+  retrievalDate     DateTime?
+  factualAsOfDate   DateTime?
   inspectedLocation String?
-  supportNotes     String?
-  archiveReference String?
-  status           SourceStatus @default(ACTIVE)
-  staleAfter       DateTime?
-  createdBy        String
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  supportNotes      String?
+  archiveReference  String?
+  status            SourceStatus @default(ACTIVE)
+  staleAfter        DateTime?
+  createdBy         String
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
-  workspace Workspace     @relation(fields: [workspaceId], references: [id])
+  workspace  Workspace     @relation(fields: [workspaceId], references: [id])
   claimLinks ClaimSource[]
 }
 
 model Claim {
-  id                 String              @id @default(cuid())
-  workspaceId        String
-  statement          String
-  classification     ClaimClassification
-  confidence         Int                 @default(3)
-  status             ClaimStatus         @default(PROPOSED)
-  publicWording      String?
+  id                   String              @id @default(cuid())
+  workspaceId          String
+  statement            String
+  classification       ClaimClassification
+  confidence           Int                 @default(3)
+  status               ClaimStatus         @default(PROPOSED)
+  publicWording        String?
   contradictionGroupId String?
-  lastReviewedAt     DateTime?
-  createdBy          String
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
+  lastReviewedAt       DateTime?
+  createdBy            String
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
 
-  workspace Workspace      @relation(fields: [workspaceId], references: [id])
-  sources   ClaimSource[]
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id])
+  sources      ClaimSource[]
   contentLinks ContentClaim[]
 }
 
 model ClaimSource {
-  id          String   @id @default(cuid())
-  claimId     String
-  sourceId    String
-  supportType String
-  supportText String?
+  id            String    @id @default(cuid())
+  claimId       String
+  sourceId      String
+  supportType   String
+  supportText   String?
   exactLocation String?
-  reviewedBy  String?
-  reviewedAt  DateTime?
+  reviewedBy    String?
+  reviewedAt    DateTime?
 
   claim  Claim  @relation(fields: [claimId], references: [id])
   source Source @relation(fields: [sourceId], references: [id])
@@ -458,17 +458,17 @@ model ContentBrief {
 }
 
 model ScriptVersion {
-  id                String   @id @default(cuid())
-  contentId         String
-  version           Int
-  body              String
+  id                 String   @id @default(cuid())
+  contentId          String
+  version            Int
+  body               String
   structuredBodyJson Json?
-  wordCount         Int      @default(0)
-  estimatedDuration Int      @default(0)
-  authorType        String   @default("HUMAN")
-  createdBy         String
-  generationId      String?
-  createdAt         DateTime @default(now())
+  wordCount          Int      @default(0)
+  estimatedDuration  Int      @default(0)
+  authorType         String   @default("HUMAN")
+  createdBy          String
+  generationId       String?
+  createdAt          DateTime @default(now())
 
   content ContentItem @relation(fields: [contentId], references: [id])
 
@@ -530,33 +530,33 @@ model AIGeneration {
 // ---------- Assets and rights ----------
 
 model Asset {
-  id            String         @id @default(cuid())
-  contentId     String
-  name          String
-  mediaType     String
-  location      String?
-  ownership     AssetOwnership @default(ORIGINAL)
-  ownerName     String?
-  sourceUrl     String?
-  intendedUse   String?
-  licenseBasis  String?
-  amountUsed    String?
-  transformation String?
-  containsMusic Boolean        @default(false)
-  spoilerLevel  SpoilerLevel   @default(NONE)
+  id                   String         @id @default(cuid())
+  contentId            String
+  name                 String
+  mediaType            String
+  location             String?
+  ownership            AssetOwnership @default(ORIGINAL)
+  ownerName            String?
+  sourceUrl            String?
+  intendedUse          String?
+  licenseBasis         String?
+  amountUsed           String?
+  transformation       String?
+  containsMusic        Boolean        @default(false)
+  spoilerLevel         SpoilerLevel   @default(NONE)
   // Prohibited-use flags (any true blocks approval):
-  flagLeaked        Boolean @default(false)
-  flagFakeTrailer   Boolean @default(false)
-  flagIsolatedCutscene Boolean @default(false)
-  flagUnlicensedMusic  Boolean @default(false)
-  flagMassProducedAI   Boolean @default(false)
-  flagDeceptive        Boolean @default(false)
-  status        AssetStatus    @default(PENDING)
-  createdBy     String
-  createdAt     DateTime       @default(now())
+  flagLeaked           Boolean        @default(false)
+  flagFakeTrailer      Boolean        @default(false)
+  flagIsolatedCutscene Boolean        @default(false)
+  flagUnlicensedMusic  Boolean        @default(false)
+  flagMassProducedAI   Boolean        @default(false)
+  flagDeceptive        Boolean        @default(false)
+  status               AssetStatus    @default(PENDING)
+  createdBy            String
+  createdAt            DateTime       @default(now())
 
-  content ContentItem   @relation(fields: [contentId], references: [id])
-  reviews RightsReview[]
+  content    ContentItem    @relation(fields: [contentId], references: [id])
+  reviews    RightsReview[]
   storedFile StoredFile?
 }
 
@@ -624,16 +624,16 @@ model Approval {
 }
 
 model Publication {
-  id          String            @id @default(cuid())
+  id          String             @id @default(cuid())
   contentId   String
   channel     PublicationChannel
-  status      PublicationStatus @default(DRAFT)
+  status      PublicationStatus  @default(DRAFT)
   publicUrl   String?
   externalId  String?
   scheduledAt DateTime?
   publishedAt DateTime?
   recordedBy  String
-  createdAt   DateTime          @default(now())
+  createdAt   DateTime           @default(now())
 
   content ContentItem @relation(fields: [contentId], references: [id])
 
@@ -641,22 +641,22 @@ model Publication {
 }
 
 model PublicArticleRevision {
-  id            String       @id @default(cuid())
-  contentId     String
-  revision      Int
-  title         String
-  slug          String
-  summary       String
-  body          String
+  id             String       @id @default(cuid())
+  contentId      String
+  revision       Int
+  title          String
+  slug           String
+  summary        String
+  body           String
   sourceSnapshot Json
-  claimSnapshot Json
-  disclaimer    String
-  spoilerLevel  SpoilerLevel
-  pillar        Pillar
+  claimSnapshot  Json
+  disclaimer     String
+  spoilerLevel   SpoilerLevel
+  pillar         Pillar
   lastVerifiedAt DateTime
-  approvedBy    String
-  approvedAt    DateTime
-  publishedAt   DateTime     @default(now())
+  approvedBy     String
+  approvedAt     DateTime
+  publishedAt    DateTime     @default(now())
 
   content ContentItem @relation(fields: [contentId], references: [id])
 
@@ -667,32 +667,32 @@ model PublicArticleRevision {
 // ---------- Corrections and updates ----------
 
 model Correction {
-  id           String             @id @default(cuid())
-  contentId    String
-  severity     CorrectionSeverity
-  originalText String
+  id            String             @id @default(cuid())
+  contentId     String
+  severity      CorrectionSeverity
+  originalText  String
   correctedText String
-  reason       String
-  sourceId     String?
-  publicNotice String
-  status       CorrectionStatus   @default(REPORTED)
-  createdBy    String
-  resolvedBy   String?
-  createdAt    DateTime           @default(now())
-  resolvedAt   DateTime?
+  reason        String
+  sourceId      String?
+  publicNotice  String
+  status        CorrectionStatus   @default(REPORTED)
+  createdBy     String
+  resolvedBy    String?
+  createdAt     DateTime           @default(now())
+  resolvedAt    DateTime?
 
   content ContentItem @relation(fields: [contentId], references: [id])
 }
 
 model UpdateTask {
-  id              String           @id @default(cuid())
-  contentId       String
-  triggerType     String
+  id               String           @id @default(cuid())
+  contentId        String
+  triggerType      String
   triggerReference String?
-  dueAt           DateTime?
-  status          UpdateTaskStatus @default(OPEN)
-  ownerId         String?
-  createdAt       DateTime         @default(now())
+  dueAt            DateTime?
+  status           UpdateTaskStatus @default(OPEN)
+  ownerId          String?
+  createdAt        DateTime         @default(now())
 
   content ContentItem @relation(fields: [contentId], references: [id])
 }
@@ -700,22 +700,22 @@ model UpdateTask {
 // ---------- Analytics ----------
 
 model AnalyticsSnapshot {
-  id                    String   @id @default(cuid())
-  contentId             String
-  platform              String
-  snapshotAt            DateTime
-  impressions           Int?
-  views                 Int?
-  ctr                   Float?
+  id                         String   @id @default(cuid())
+  contentId                  String
+  platform                   String
+  snapshotAt                 DateTime
+  impressions                Int?
+  views                      Int?
+  ctr                        Float?
   firstThirtySecondRetention Float?
   averagePercentageViewed    Float?
-  watchHours            Float?
-  subscribersGained     Int?
-  shortsToLongClicks    Int?
-  trafficSourcesJson    Json?
-  revenueJson           Json?
-  importedBy            String
-  createdAt             DateTime @default(now())
+  watchHours                 Float?
+  subscribersGained          Int?
+  shortsToLongClicks         Int?
+  trafficSourcesJson         Json?
+  revenueJson                Json?
+  importedBy                 String
+  createdAt                  DateTime @default(now())
 
   content ContentItem @relation(fields: [contentId], references: [id])
 }
@@ -770,12 +770,12 @@ enum ReleaseStatus {
 // Contractor/contributor profile. Never stores payment credentials, bank data,
 // tax identifiers, passwords, or identity documents — names/specialty only.
 model Contributor {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   workspaceId String
-  userId      String? @unique
+  userId      String?  @unique
   displayName String
   specialty   String?
-  status      String  @default("ACTIVE")
+  status      String   @default("ACTIVE")
   notes       String?
   createdAt   DateTime @default(now())
 
@@ -857,9 +857,9 @@ model CaptureSession {
   supersedesId          String?
   createdAt             DateTime      @default(now())
 
-  content       ContentItem    @relation(fields: [contentId], references: [id])
-  assignment    Assignment?    @relation(fields: [assignmentId], references: [id])
-  shot          Shot?          @relation(fields: [shotId], references: [id])
+  content       ContentItem          @relation(fields: [contentId], references: [id])
+  assignment    Assignment?          @relation(fields: [assignmentId], references: [id])
+  shot          Shot?                @relation(fields: [shotId], references: [id])
   shortsScripts ShortsScript[]
   media         CaptureMedia?
   highlights    HighlightCandidate[]
@@ -950,7 +950,7 @@ model VisualAsset {
   importedBy              String
   createdAt               DateTime            @default(now())
 
-  brief VisualBrief @relation(fields: [briefId], references: [id])
+  brief      VisualBrief @relation(fields: [briefId], references: [id])
   storedFile StoredFile?
 }
 
@@ -1003,18 +1003,18 @@ model SignInThrottle {
 // ---------- Audit (append-only, enforced by trigger) ----------
 
 model AuditEvent {
-  id          String   @id @default(cuid())
-  workspaceId String
-  actorId     String?
-  actorType   String   @default("USER")
-  action      String
-  entityType  String
-  entityId    String
-  beforeJson  Json?
-  afterJson   Json?
+  id           String   @id @default(cuid())
+  workspaceId  String
+  actorId      String?
+  actorType    String   @default("USER")
+  action       String
+  entityType   String
+  entityId     String
+  beforeJson   Json?
+  afterJson    Json?
   metadataJson Json?
-  requestId   String?
-  createdAt   DateTime @default(now())
+  requestId    String?
+  createdAt    DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id])
 
@@ -1028,87 +1028,87 @@ model AuditEvent {
 // never from unreviewed footage. Safety flags route to human review; they are
 // never silently auto-filtered.
 model ShortsScript {
-  id                 String             @id @default(cuid())
-  workspaceId        String
-  captureSessionId   String
-  provider           String // actual provider name, never assumed
-  model              String // actual configured model identifier
-  hookText           String
-  sectionsJson       Json // { text, timestampSec }[]
-  highlightsJson     Json // detected highlights, for editor reference
-  safetyFlagsJson    Json // any positive flag => QUARANTINED until human review
-  status             AIValidationStatus
+  id                   String             @id @default(cuid())
+  workspaceId          String
+  captureSessionId     String
+  provider             String // actual provider name, never assumed
+  model                String // actual configured model identifier
+  hookText             String
+  sectionsJson         Json // { text, timestampSec }[]
+  highlightsJson       Json // detected highlights, for editor reference
+  safetyFlagsJson      Json // any positive flag => QUARANTINED until human review
+  status               AIValidationStatus
   // Approved highlight cut this script is built from (local pipeline only).
   highlightCandidateId String?
   // Title cards for a GRAPHICS session: { label, value, note }[] in narration
   // order (hook first). Null for gameplay scripts.
-  cardsJson          Json?
-  createdBy          String
-  createdAt          DateTime           @default(now())
+  cardsJson            Json?
+  createdBy            String
+  createdAt            DateTime           @default(now())
 
-  captureSession CaptureSession   @relation(fields: [captureSessionId], references: [id])
+  captureSession     CaptureSession      @relation(fields: [captureSessionId], references: [id])
   highlightCandidate HighlightCandidate? @relation(fields: [highlightCandidateId], references: [id])
-  voiceover      ShortsVoiceover?
-  renders        ShortsRender[]
+  voiceover          ShortsVoiceover?
+  renders            ShortsRender[]
 }
 
 model ShortsVoiceover {
-  id             String   @id @default(cuid())
-  workspaceId    String
-  scriptId       String   @unique
-  provider       String
-  voiceProfileId String
-  assetPath      String // written via AssetStorage under shorts/
-  durationSec    Float
-  duckingJson    Json // { timestampSec, gainDb }[]
-  cuesJson       Json? // { startSec, endSec, text }[] caption timing (local providers)
+  id               String   @id @default(cuid())
+  workspaceId      String
+  scriptId         String   @unique
+  provider         String
+  voiceProfileId   String
+  assetPath        String // written via AssetStorage under shorts/
+  durationSec      Float
+  duckingJson      Json // { timestampSec, gainDb }[]
+  cuesJson         Json? // { startSec, endSec, text }[] caption timing (local providers)
   // Fixture narration (e.g. macOS system voice) is never publishable.
-  isFixture      Boolean  @default(false)
+  isFixture        Boolean  @default(false)
   // What the voice is, recorded separately from the publish taint above.
-  isSynthetic    Boolean  @default(false)
-  voiceName      String?
+  isSynthetic      Boolean  @default(false)
+  voiceName        String?
   voiceLicenseNote String?
-  qaJson         Json? // narration QA: clipping, silence, transcription, sync
-  createdBy      String
-  createdAt      DateTime @default(now())
+  qaJson           Json? // narration QA: clipping, silence, transcription, sync
+  createdBy        String
+  createdAt        DateTime @default(now())
 
   script  ShortsScript   @relation(fields: [scriptId], references: [id])
   renders ShortsRender[]
 }
 
 model ShortsRender {
-  id            String           @id @default(cuid())
-  workspaceId   String
-  scriptId      String
-  voiceoverId   String
-  storagePath   String
-  durationSec   Float
-  resolution    String // "1080x1920"
-  frameRate     Int // 30 by default (cost decision, see blueprint)
-  renderCostUsd Float            @default(0)
-  format        String           @default("9:16") // "9:16" | "16:9"
+  id               String             @id @default(cuid())
+  workspaceId      String
+  scriptId         String
+  voiceoverId      String
+  storagePath      String
+  durationSec      Float
+  resolution       String // "1080x1920"
+  frameRate        Int // 30 by default (cost decision, see blueprint)
+  renderCostUsd    Float              @default(0)
+  format           String             @default("9:16") // "9:16" | "16:9"
   // Any fixture input (synthetic footage or fixture narration) taints the render.
-  isFixture     Boolean          @default(false)
-  checksumSha256 String?
-  bundlePath    String? // review bundle zip (local providers)
-  manifestJson  Json? // provenance: source timecodes, rights, hashes, settings
+  isFixture        Boolean            @default(false)
+  checksumSha256   String?
+  bundlePath       String? // review bundle zip (local providers)
+  manifestJson     Json? // provenance: source timecodes, rights, hashes, settings
   // What the picture is (separate from who approved it).
-  mediaClass    MediaClass?
+  mediaClass       MediaClass?
   // Stored lifecycle for locally rendered drafts. Automation stops at
   // PENDING_MIKE_REVIEW; MIKE_APPROVED needs an Owner action on this exact file.
-  reviewState   RenderReviewState?
-  qaJson        Json? // recorded QA results for this file
-  idempotencyKey String? // hash of the real inputs; see MediaJob
+  reviewState      RenderReviewState?
+  qaJson           Json? // recorded QA results for this file
+  idempotencyKey   String? // hash of the real inputs; see MediaJob
   approvedChecksum String?
-  approvedBy    String?
-  approvedAt    DateTime?
+  approvedBy       String?
+  approvedAt       DateTime?
   // Human quality gate: PENDING until an Owner/Editor approves (CLEAN) or
   // rejects (REJECTED). Publish requires CLEAN.
-  status        QuarantineStatus @default(PENDING)
-  reviewNotes   String?
-  reviewedBy    String?
-  createdBy     String
-  createdAt     DateTime         @default(now())
+  status           QuarantineStatus   @default(PENDING)
+  reviewNotes      String?
+  reviewedBy       String?
+  createdBy        String
+  createdAt        DateTime           @default(now())
 
   script      ShortsScript        @relation(fields: [scriptId], references: [id])
   voiceover   ShortsVoiceover     @relation(fields: [voiceoverId], references: [id])
@@ -1116,18 +1116,18 @@ model ShortsRender {
 }
 
 model YouTubePublication {
-  id              String            @id @default(cuid())
-  workspaceId     String
-  renderId        String            @unique
-  youtubeVideoId  String? // populated only after a real, successful publish call
-  title           String
-  description     String
-  tags            String[]
-  disclosureJson  Json // C2PA / altered-or-synthetic markers included in the payload
-  status          PublicationStatus @default(DRAFT)
-  publishedBy     String?
-  publishedAt     DateTime?
-  createdAt       DateTime          @default(now())
+  id             String            @id @default(cuid())
+  workspaceId    String
+  renderId       String            @unique
+  youtubeVideoId String? // populated only after a real, successful publish call
+  title          String
+  description    String
+  tags           String[]
+  disclosureJson Json // C2PA / altered-or-synthetic markers included in the payload
+  status         PublicationStatus @default(DRAFT)
+  publishedBy    String?
+  publishedAt    DateTime?
+  createdAt      DateTime          @default(now())
 
   render ShortsRender @relation(fields: [renderId], references: [id])
 }
@@ -1179,7 +1179,17 @@ model CaptureMedia {
   ingestedBy       String
   createdAt        DateTime          @default(now())
 
-  captureSession CaptureSession @relation(fields: [captureSessionId], references: [id])
+  // Rights provenance (creator footage). All optional: owner-captured footage
+  // has no agreement. A link is a record, never a clearance on its own.
+  agreementId          String?
+  rightsReviewDecision String? // "APPROVED" | "REJECTED" - human rights review of this file
+  rightsReviewNote     String?
+  rightsReviewedBy     String?
+  rightsReviewedAt     DateTime?
+  thirdPartyNotes      String? // music, voices, other embedded material and its restrictions
+
+  captureSession CaptureSession    @relation(fields: [captureSessionId], references: [id])
+  agreement      CreatorAgreement? @relation(fields: [agreementId], references: [id])
 
   @@unique([workspaceId, checksumSha256])
 }
@@ -1256,27 +1266,27 @@ enum MediaJobStatus {
 // One row per distinct narration/render request (same real inputs = same key).
 // Prevents duplicates, bounds retries and keeps a record of failures.
 model MediaJob {
-  id             String         @id @default(cuid())
-  workspaceId    String
-  kind           MediaJobKind
-  idempotencyKey String
-  subjectId      String // scriptId (NARRATION) or voiceoverId (RENDER)
-  label          String // e.g. "Render 9:16"
-  status         MediaJobStatus @default(QUEUED)
-  attempts       Int            @default(0) // total attempts across retries
-  lastError      String?
-  failureJson    Json? // QA report or diagnostics of the last failed attempt
-  resultId       String? // ShortsVoiceover.id or ShortsRender.id
+  id                String         @id @default(cuid())
+  workspaceId       String
+  kind              MediaJobKind
+  idempotencyKey    String
+  subjectId         String // scriptId (NARRATION) or voiceoverId (RENDER)
+  label             String // e.g. "Render 9:16"
+  status            MediaJobStatus @default(QUEUED)
+  attempts          Int            @default(0) // total attempts across retries
+  lastError         String?
+  failureJson       Json? // QA report or diagnostics of the last failed attempt
+  resultId          String? // ShortsVoiceover.id or ShortsRender.id
   // Background jobs (PREMIUM_RENDER) only:
   progress          String? // what the job is doing now, for the operator
   heartbeatAt       DateTime? // refreshed while the job's process is alive
   cancelRequestedAt DateTime?
   pid               Int? // process group of the running engine
-  startedAt      DateTime?
-  finishedAt     DateTime?
-  createdBy      String
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  createdBy         String
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   @@unique([workspaceId, kind, idempotencyKey])
   @@index([workspaceId, subjectId])
@@ -1358,4 +1368,109 @@ model StreamSource {
   captureSession CaptureSession @relation(fields: [captureSessionId], references: [id])
 
   @@unique([workspaceId, platform, videoId])
+}
+
+// ---------- Creator partnerships and footage rights ----------
+// Internal records only. Nothing here contacts anyone, signs anything or
+// clears anything for publication by itself. See lib/rights/*.
+
+enum CreatorStatus {
+  PROSPECT
+  QUALIFIED
+}
+
+enum AgreementStatus {
+  AGREEMENT_DRAFT
+  LEGAL_REVIEW
+  APPROVED_TO_CONTACT
+  SENT
+  NEGOTIATING
+  EXECUTED_VERIFIED
+  ACTIVE
+  EXPIRED
+  REVOKED
+  REJECTED
+}
+
+model Creator {
+  id                  String        @id @default(cuid())
+  workspaceId         String
+  name                String
+  platform            String // youtube | twitch | kick | tiktok | instagram | facebook | other
+  profileUrl          String
+  tier                String? // HIGH_PROFILE | REALISTIC_PARTNER
+  games               String[]
+  categories          String[]
+  audienceNote        String? // only what was verifiable, with its source
+  audienceSource      String?
+  businessContact     String? // only a contact the creator published for business
+  contactSource       String?
+  fitNotes            String?
+  rightsComplications String?
+  sourceUrl           String
+  retrievedAt         DateTime
+  confidence          String // HIGH | MEDIUM | LOW
+  status              CreatorStatus @default(PROSPECT)
+  qualifiedEvidence   String?
+  nextAction          String?
+  createdBy           String
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  agreements CreatorAgreement[]
+
+  @@unique([workspaceId, profileUrl])
+}
+
+model CreatorAgreement {
+  id                   String          @id @default(cuid())
+  workspaceId          String
+  creatorId            String
+  title                String
+  status               AgreementStatus @default(AGREEMENT_DRAFT)
+  templateVersion      String?
+  rightsOwner          String?
+  ownershipEvidence    String?
+  footageScope         String?
+  editingAllowed       Boolean         @default(false)
+  derivativesAllowed   Boolean         @default(false)
+  approvedDestinations String[]
+  commercialUse        Boolean         @default(false)
+  monetizationAllowed  Boolean         @default(false)
+  attribution          String?
+  compensationTerms    String?
+  excludedRights       String? // what the creator cannot license: music, publisher rights, voices
+  effectiveAt          DateTime?
+  expiresAt            DateTime?
+  revokedAt            DateTime?
+  revocationReason     String?
+  legalReviewer        String?
+  legalReviewNote      String?
+  legalReviewedAt      DateTime?
+  signatureEvidence    String?
+  createdBy            String
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  creator Creator          @relation(fields: [creatorId], references: [id])
+  events  AgreementEvent[]
+  media   CaptureMedia[]
+
+  @@index([workspaceId, status])
+}
+
+// Every status change, with the evidence that justified it.
+model AgreementEvent {
+  id           String           @id @default(cuid())
+  agreementId  String
+  fromStatus   AgreementStatus?
+  toStatus     AgreementStatus
+  evidence     String
+  actorId      String
+  affectedJson Json? // assets affected by an expiry or revocation
+  createdAt    DateTime         @default(now())
+
+  agreement CreatorAgreement @relation(fields: [agreementId], references: [id])
+
+  @@index([agreementId, createdAt])
 }

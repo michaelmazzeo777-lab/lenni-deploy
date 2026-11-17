@@ -5,6 +5,7 @@ import { can } from "@/lib/permissions";
 import { Banner } from "@/app/_ui";
 import { approveRenderVersionAction, reviewRenderAction } from "@/app/studio/shorts-actions";
 import { approveSessionClipAction, reviewSessionClipAction } from "@/app/studio/clipper-actions";
+import { externalClearance } from "@/lib/rights/clearance";
 
 // LIBRARY and REVIEW: every rendered video that still exists, playable, with
 // what a reviewer needs beside it - evidence, asset rights, QA, approval state.
@@ -72,7 +73,9 @@ export default async function LibraryPage({
   });
   const sessionClips = await prisma.sessionClip.findMany({
     where: { workspaceId: actor.workspaceId, bundlePath: { not: null } },
-    include: { captureSession: { include: { content: true } } },
+    include: {
+      captureSession: { include: { content: true, media: { include: { agreement: true } } } },
+    },
     orderBy: { createdAt: "desc" },
     take: 60,
   });
@@ -291,6 +294,21 @@ export default async function LibraryPage({
         };
         const qa = (c.qaJson ?? null) as Qa | null;
         const gone = c.reviewState === "REJECTED";
+        const m = c.captureSession.media;
+        const clearance = externalClearance({
+          now: new Date(),
+          destination: null,
+          media: m
+            ? {
+                rightsStatus: m.rightsStatus,
+                rightsReviewDecision: m.rightsReviewDecision,
+                thirdPartyNotes: m.thirdPartyNotes,
+              }
+            : null,
+          agreement: m?.agreement ?? null,
+          clipOwnerApproved: c.reviewState === "MIKE_APPROVED",
+          platformAccountVerified: false,
+        });
         return (
           <div className="card" key={c.id} data-testid="library-clip-item">
             <h2 style={{ marginBottom: 4 }}>{c.captureSession.content.workingTitle}</h2>
@@ -302,8 +320,33 @@ export default async function LibraryPage({
                 {STATE[c.reviewState ?? ""] ?? c.reviewState}
               </span>{" "}
               <span className="badge LEAKED">PUBLICATION BLOCKED</span>{" "}
-              <span className="badge RUMOR">RIGHTS OPEN — not reviewed</span>
+              <span className="badge RUMOR">
+                {clearance.creator.ok ? "CREATOR RIGHTS OK" : "RIGHTS OPEN"}
+              </span>
             </p>
+            {!gone ? (
+              <details data-testid="clip-clearance" style={{ fontSize: "0.82rem", marginTop: 4 }}>
+                <summary>
+                  Internal draft export: available · External delivery:{" "}
+                  <strong>{clearance.cleared ? "cleared" : "BLOCKED"}</strong>
+                </summary>
+                <ul style={{ margin: "4px 0 8px 18px" }}>
+                  {(
+                    [
+                      ["Creator rights", clearance.creator],
+                      ["Platform", clearance.platform],
+                      ["Publisher & editorial", clearance.publisher],
+                    ] as const
+                  ).map(([name, layer]) => (
+                    <li key={name}>
+                      {name}: {layer.ok ? "OK" : layer.reasons.join("; ")}
+                    </li>
+                  ))}
+                </ul>
+                <Link href="/studio/rights">Creators &amp; rights</Link> ·{" "}
+                <Link href="/studio/platforms">Platform connections</Link>
+              </details>
+            ) : null}
             {gone ? (
               <p className="muted" style={{ fontSize: "0.85rem" }}>
                 Revision requested{c.reviewNotes ? `: ${c.reviewNotes}` : ""}. The file is no longer
@@ -326,7 +369,9 @@ export default async function LibraryPage({
                   <div className="muted" style={{ fontSize: "0.78rem" }}>
                     Captions are burned into the picture.{" "}
                     <a href={`/studio/media/clip-captions/${c.id}`}>Caption file (SRT)</a> ·{" "}
-                    <a href={`/studio/media/clip-bundle/${c.id}`}>review bundle</a>
+                    <a href={`/studio/media/clip-bundle/${c.id}`}>
+                      internal draft export (review bundle)
+                    </a>
                   </div>
                   <div className="muted" style={{ fontSize: "0.78rem" }}>
                     SHA-256: <code>{c.checksumSha256}</code>
