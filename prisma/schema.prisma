@@ -864,6 +864,7 @@ model CaptureSession {
   media         CaptureMedia?
   highlights    HighlightCandidate[]
   sessionClips  SessionClip[]
+  streamSource  StreamSource?
 }
 
 // ---------- Visual production ----------
@@ -1236,6 +1237,12 @@ enum MediaJobKind {
   RENDER
   PREMIUM_RENDER // both formats from the premium engine, run in the background
   SESSION_CLIP // long-session clipper: shortlist, whisper, cut, both formats
+  // The stream clipper runs as two jobs, not one, because the operator picks
+  // the moments between them: STREAM_INGEST ends SUCCEEDED with chunks on
+  // disk, then STREAM_CLIP runs once picks.json exists. "Waiting for picks"
+  // is therefore an ordinary gap between two jobs, not a new job status.
+  STREAM_INGEST // URL -> audio only -> full transcript -> picking chunks
+  STREAM_CLIP // picks.json -> section download -> render -> Library
 }
 
 enum MediaJobStatus {
@@ -1312,8 +1319,43 @@ model SessionClip {
   approvedAt       DateTime?
   createdBy        String
   createdAt        DateTime           @default(now())
+  // Stream-clipper additions. All nullable: a local-file clip leaves them
+  // null and behaves exactly as before.
+  hookTitle        String? // burned over the first seconds of a stream clip
+  postKitPath      String? // post.md (caption, hashtags, credit, source timestamp)
+  sourceStartSec   Float? // where this clip sits in the ORIGINAL stream's timeline
+  cropModeUsed     String? // what actually ran, incl. a facecam-stack fallback
 
   captureSession CaptureSession @relation(fields: [captureSessionId], references: [id])
 
   @@index([captureSessionId, analysisRunId, rank])
+}
+
+/// Provenance for a clip sourced from a public VOD URL rather than a local
+/// file. Separate from CaptureMedia on purpose: CaptureMedia is one row per
+/// capture with required width/height/videoCodec, and a stream ingest has
+/// audio first and only later a few partial video sections, so it has no
+/// honest row shape there.
+model StreamSource {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  captureSessionId   String   @unique
+  platform           String // "youtube" | "twitch" | "kick"
+  videoId            String
+  canonicalUrl       String
+  channelName        String
+  channelHandle      String?
+  title              String?
+  streamDurationSec  Float?
+  audioPath          String? // storage-relative path of the audio-only pull
+  audioBytes         BigInt?
+  downloadedBytes    BigInt   @default(0) // measured on disk, cumulative
+  allowlistEntry     String? // which allowlist channel matched
+  unlistedApprovedBy String? // set only when the owner approved an unlisted channel
+  requestedBy        String
+  createdAt          DateTime @default(now())
+
+  captureSession CaptureSession @relation(fields: [captureSessionId], references: [id])
+
+  @@unique([workspaceId, platform, videoId])
 }

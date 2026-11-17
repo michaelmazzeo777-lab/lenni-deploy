@@ -1,0 +1,13 @@
+{
+  "comment": [
+    "Streamers who have given permission for their VODs to be clipped.",
+    "URL ingest REFUSES every channel that is not listed here.",
+    "Entries are added only on Mike's explicit instruction, naming the channel.",
+    "--allow-unlisted does not bypass this file on its own: it requires Mike's",
+    "approval in chat for that specific run, recorded in the job's audit event.",
+    "Permission is a human judgement about rights. Nothing in this repo verifies",
+    "it, and being listed here is not a licence or a fair-use determination."
+  ],
+  "version": 1,
+  "channels": []
+}
