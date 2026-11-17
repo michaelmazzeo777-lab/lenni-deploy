@@ -40,7 +40,9 @@ test("creators, agreement draft and platform connection status", async ({ page }
   await page.getByRole("link", { name: "Platform connections" }).click();
   await expect(page.getByText("No account is connected.")).toBeVisible();
   for (const p of ["youtube", "twitch", "instagram", "facebook", "tiktok"]) {
-    await expect(page.getByTestId(`platform-${p}`).getByText("NOT CONNECTED")).toBeVisible();
+    await expect(
+      page.getByTestId(`platform-${p}`).getByText("NOT CONNECTED", { exact: true }),
+    ).toBeVisible();
   }
   await expect(page.getByRole("button", { name: /connect/i })).toHaveCount(0);
   await expect(page.getByTestId("manual-publishing")).toBeVisible();
