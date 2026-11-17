@@ -11,7 +11,14 @@ import { prisma } from "@/lib/db";
 import type { MediaJobKind, Prisma } from "@prisma/client";
 
 /** Every job kind that runs ffmpeg, speech synthesis/recognition or the premium engine. */
-export const HEAVY_KINDS: MediaJobKind[] = ["NARRATION", "RENDER", "PREMIUM_RENDER"];
+export const HEAVY_KINDS: MediaJobKind[] = [
+  "NARRATION",
+  "RENDER",
+  "PREMIUM_RENDER",
+  "SESSION_CLIP",
+  "STREAM_INGEST",
+  "STREAM_CLIP",
+];
 export const HEARTBEAT_INTERVAL_MS = Number(process.env.JOB_HEARTBEAT_INTERVAL_MS ?? 10_000);
 /** A RUNNING job whose heartbeat is older than this has lost its process. */
 export const HEAVY_STALE_MS = Number(process.env.JOB_HEARTBEAT_STALE_MS ?? 45_000);

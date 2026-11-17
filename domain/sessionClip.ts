@@ -24,10 +24,11 @@ import { wordsToCues } from "@/lib/clipper/captions";
 import { renderClip, type CropMode } from "@/lib/clipper/render";
 import { clipQa } from "@/lib/clipper/qa";
 import { cleanClipperWork, clipperProblems, clipperWorkRoot } from "@/lib/clipper/engine";
+import { claimHeavySlot, HEAVY_STALE_MS, staleBefore, startHeartbeat } from "@/lib/jobs/heavy";
 import type { MediaJob } from "@prisma/client";
 
 export const CLIPPER_LABEL = "Clip a session";
-export const HEARTBEAT_STALE_MS = 45_000;
+export const HEARTBEAT_STALE_MS = HEAVY_STALE_MS;
 const FORMATS: RenderFormat[] = ["16:9", "9:16"];
 const sha256 = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 
@@ -100,20 +101,26 @@ export async function startSessionClip(
         throw e;
       }));
 
-  const claimed = await prisma.mediaJob.updateMany({
-    where: { id: job.id, status: { in: ["QUEUED", "FAILED", "CANCELED", "SUCCEEDED"] } },
-    data: {
-      status: "RUNNING",
+  // Atomic claim: only one request can move the row to RUNNING, and only
+  // while no other heavy media job holds the machine (one at a time on 8 GB).
+  const claim = await claimHeavySlot(
+    job.id,
+    { status: { in: ["QUEUED", "FAILED", "CANCELED", "SUCCEEDED"] } },
+    {
       startedAt: new Date(),
       finishedAt: null,
-      heartbeatAt: new Date(),
       cancelRequestedAt: null,
       progress: "Starting",
       lastError: null,
       attempts: { increment: 1 },
     },
-  });
-  if (claimed.count === 0) {
+  );
+  if (!claim.ok && claim.reason === "busy") {
+    throw precondition(
+      `Another media job is running ("${claim.holder}"); clip this session when it finishes`,
+    );
+  }
+  if (!claim.ok) {
     throw precondition("This session is already being clipped; cancel it or wait for it to finish");
   }
   await writeAudit({
@@ -125,7 +132,7 @@ export async function startSessionClip(
     metadata: { captureSessionId, n, cropMode },
   });
   // Deliberately not awaited: the job outlives the request. Its state is in the database.
-  void execute(job.id, actor, { n, cropMode }).catch(() => undefined);
+  void execute(job.id, actor, { n, cropMode }, claim.attempt).catch(() => undefined);
   return prisma.mediaJob.findUniqueOrThrow({ where: { id: job.id } });
 }
 
@@ -163,10 +170,7 @@ export async function recoverInterruptedSessionClipJobs(workspaceId: string): Pr
       workspaceId,
       kind: "SESSION_CLIP",
       status: "RUNNING",
-      OR: [
-        { heartbeatAt: null },
-        { heartbeatAt: { lt: new Date(Date.now() - HEARTBEAT_STALE_MS) } },
-      ],
+      OR: [{ heartbeatAt: null }, { heartbeatAt: { lt: staleBefore() } }],
     },
   });
   for (const job of stale) {
@@ -174,8 +178,14 @@ export async function recoverInterruptedSessionClipJobs(workspaceId: string): Pr
     const message = canceled
       ? "Canceled by the operator"
       : "Interrupted: the Studio stopped while this job was running. Retry to run it again.";
+    // Closes only the attempt found stale, and only if it is still stale now.
     const closed = await prisma.mediaJob.updateMany({
-      where: { id: job.id, status: "RUNNING" },
+      where: {
+        id: job.id,
+        status: "RUNNING",
+        attempts: job.attempts,
+        OR: [{ heartbeatAt: null }, { heartbeatAt: { lt: staleBefore() } }],
+      },
       data: {
         status: canceled ? "CANCELED" : "FAILED",
         lastError: message,
@@ -209,8 +219,16 @@ interface AcceptedMoment {
   wordsVerified: boolean;
 }
 
-async function execute(jobId: string, actor: Actor, opts: { n: number; cropMode: CropMode }) {
+async function execute(
+  jobId: string,
+  actor: Actor,
+  opts: { n: number; cropMode: CropMode },
+  attempt: number,
+) {
   const storage = getAssetStorage();
+  // This runner owns attempt `attempt` only; every job-row write is fenced by it.
+  const mine = { id: jobId, status: "RUNNING" as const, attempts: attempt };
+  const stopHeartbeat = startHeartbeat(jobId, attempt);
   let lastWrite = 0;
   let lastText = "";
   const beat = (text: string, force = false) => {
@@ -220,21 +238,25 @@ async function execute(jobId: string, actor: Actor, opts: { n: number; cropMode:
     lastText = text;
     void prisma.mediaJob
       .updateMany({
-        where: { id: jobId, status: "RUNNING" },
+        where: mine,
         data: { progress: text.slice(0, 200), heartbeatAt: new Date() },
       })
       .catch(() => undefined);
   };
-  const canceled = async () =>
-    (
-      await prisma.mediaJob.findUnique({
-        where: { id: jobId },
-        select: { cancelRequestedAt: true },
-      })
-    )?.cancelRequestedAt != null;
+  // True when the operator asked to stop, or this runner no longer owns the
+  // job (it was recovered or retried): either way, stop producing clips.
+  const canceled = async () => {
+    const row = await prisma.mediaJob.findUnique({
+      where: { id: jobId },
+      select: { cancelRequestedAt: true, status: true, attempts: true },
+    });
+    return (
+      !row || row.cancelRequestedAt != null || row.status !== "RUNNING" || row.attempts !== attempt
+    );
+  };
   const finish = async (status: "FAILED" | "CANCELED", message: string, failure: unknown) => {
     await prisma.mediaJob.updateMany({
-      where: { id: jobId, status: "RUNNING" },
+      where: mine,
       data: {
         status,
         lastError: message.slice(0, 2000),
@@ -523,7 +545,7 @@ async function execute(jobId: string, actor: Actor, opts: { n: number; cropMode:
     );
 
     await prisma.mediaJob.updateMany({
-      where: { id: jobId, status: "RUNNING" },
+      where: mine,
       data: {
         status: "SUCCEEDED",
         resultId: made[0],
@@ -535,6 +557,8 @@ async function execute(jobId: string, actor: Actor, opts: { n: number; cropMode:
     await cleanClipperWork(jobId);
   } catch (e) {
     await finish("FAILED", e instanceof Error ? e.message : "Unexpected error", null);
+  } finally {
+    stopHeartbeat();
   }
 }
 

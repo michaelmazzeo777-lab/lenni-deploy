@@ -14,6 +14,7 @@ import { makeWorkspace } from "../helpers/factory";
 import { claimHeavySlot, heavySlotHolder, startHeartbeat } from "@/lib/jobs/heavy";
 import { runMediaJob } from "@/domain/mediaJobs";
 import { recoverInterruptedJobs } from "@/domain/premiumRender";
+import { recoverInterruptedSessionClipJobs } from "@/domain/sessionClip";
 import { run } from "@/lib/media/ffmpeg";
 import type { Actor } from "@/lib/auth/context";
 
@@ -179,6 +180,35 @@ describe("crash and retry", () => {
     const row = await prisma.mediaJob.findFirstOrThrow({ where: { idempotencyKey: key } });
     made.push(row.id);
     expect(row.resultId).toBeNull();
+  });
+});
+
+describe("session clipper recovery (audit F02)", () => {
+  it("closes a clip job whose heartbeat stopped, but never one that is still beating", async () => {
+    const dead = await job("SESSION_CLIP", {
+      status: "RUNNING",
+      attempts: 1,
+      heartbeatAt: new Date(Date.now() - 60_000),
+    });
+    const alive = await job("SESSION_CLIP", { status: "RUNNING", attempts: 1 });
+    const stop = startHeartbeat(alive.id, 1);
+    try {
+      await prisma.mediaJob.update({ where: { id: alive.id }, data: { heartbeatAt: new Date() } });
+      await sleep(1200); // a long stage: well past the staleness window, still beating
+      await recoverInterruptedSessionClipJobs(actor.workspaceId);
+      expect((await reload(dead.id)).status).toBe("FAILED");
+      expect((await reload(alive.id)).status).toBe("RUNNING");
+    } finally {
+      stop();
+    }
+  });
+
+  it("counts a clip job as holding the heavy slot", async () => {
+    const clip = await job("SESSION_CLIP", { status: "RUNNING", heartbeatAt: new Date() });
+    const premium = await job("PREMIUM_RENDER");
+    const r = await claimHeavySlot(premium.id, { status: "QUEUED" }, {});
+    expect(r).toMatchObject({ ok: false, reason: "busy" });
+    await free(clip.id);
   });
 });
 
