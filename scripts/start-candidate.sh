@@ -1,5 +1,5 @@
 #!/bin/sh
-# Starts the final-candidate Studio on http://127.0.0.1:3300 with the real local
+# Starts the final-candidate Studio on http://127.0.0.1:3400 with the real local
 # pipeline. It uses only this folder: its own .env, its own PostgreSQL (port
 # 5433, data in .data/pg) and its own media (.data/storage). It never touches
 # the baseline Studio (port 3000, PostgreSQL 5432) or its data.
@@ -19,5 +19,5 @@ grep -Eq "^DATABASE_URL=.*@localhost:$PGPORT/fgcand_dev" .env || {
 "$PGBIN/pg_isready" -q -h localhost -p $PGPORT ||
   "$PGBIN/pg_ctl" -D "$PGDATA" -l "$PGDATA/server.log" -o "-c listen_addresses=localhost -p $PGPORT" -w start
 [ -f .next/BUILD_ID ] || pnpm build
-echo "Field Guide Studio (candidate): http://127.0.0.1:3300   sign-in details are on the sign-in page"
-exec pnpm exec next start -H 127.0.0.1 -p 3300
+echo "Field Guide Studio (candidate): http://127.0.0.1:3400   sign-in details are on the sign-in page"
+exec pnpm exec next start -H 127.0.0.1 -p 3400

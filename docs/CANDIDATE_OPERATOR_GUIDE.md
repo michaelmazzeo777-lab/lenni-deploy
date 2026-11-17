@@ -8,7 +8,7 @@ Internal use only. **Nothing here publishes.** The baseline Studio (port 3000) i
 sh scripts/start-candidate.sh
 ```
 
-Open `http://127.0.0.1:3300`. Sign-in details are on the sign-in page. Stop the Studio with Ctrl-C. To stop the candidate's database as well:
+Open `http://127.0.0.1:3400`. Sign-in details are on the sign-in page. Stop the Studio with Ctrl-C. To stop the candidate's database as well:
 
 ```bash
 sh scripts/start-candidate.sh stop
