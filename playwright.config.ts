@@ -2,11 +2,14 @@ import { defineConfig, devices } from "@playwright/test";
 import { assertDisposableDbUrl } from "./lib/testing/db-guard";
 
 const PORT = 3100;
-const BASE_URL = `http://127.0.0.1:${PORT}`;
+// Servers bind to 127.0.0.1 only (see webServer below). The URLs stay
+// "localhost": the session cookie is Secure in production mode, and
+// Playwright's request client sends Secure cookies over http only to localhost.
+const BASE_URL = `http://localhost:${PORT}`;
 // Second server: same build and database, but with the real local Shorts
 // providers, for tests/e2e/local-media.spec.ts and explainer.spec.ts.
 const LOCAL_PORT = 3101;
-const LOCAL_URL = `http://127.0.0.1:${LOCAL_PORT}`;
+const LOCAL_URL = `http://localhost:${LOCAL_PORT}`;
 // The browser suite RESEEDS (wipes) its database, so it only accepts the
 // candidate's disposable fgcand_e2e on localhost:5433.
 const DB_URL = assertDisposableDbUrl(
