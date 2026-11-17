@@ -1,19 +1,19 @@
 import { defineConfig, devices } from "@playwright/test";
+import { assertDisposableDbUrl } from "./lib/testing/db-guard";
 
 const PORT = 3100;
-const BASE_URL = `http://localhost:${PORT}`;
+const BASE_URL = `http://127.0.0.1:${PORT}`;
 // Second server: same build and database, but with the real local Shorts
 // providers, for tests/e2e/local-media.spec.ts and explainer.spec.ts.
 const LOCAL_PORT = 3101;
-const LOCAL_URL = `http://localhost:${LOCAL_PORT}`;
-// The browser suite RESEEDS (wipes) its database. It used to fall back to the
-// development database when E2E_DATABASE_URL was unset; now it refuses to run.
-const DB_URL = process.env.E2E_DATABASE_URL ?? "";
-if (!DB_URL) {
-  throw new Error(
-    "E2E_DATABASE_URL is not set. The browser tests wipe their database; point it at a disposable one.",
-  );
-}
+const LOCAL_URL = `http://127.0.0.1:${LOCAL_PORT}`;
+// The browser suite RESEEDS (wipes) its database, so it only accepts the
+// candidate's disposable fgcand_e2e on localhost:5433.
+const DB_URL = assertDisposableDbUrl(
+  process.env.E2E_DATABASE_URL,
+  "E2E_DATABASE_URL",
+  "fgcand_e2e",
+);
 
 function serverEnv(baseUrl: string) {
   return {
@@ -80,14 +80,14 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `pnpm start -p ${PORT}`,
+      command: `pnpm start -H 127.0.0.1 -p ${PORT}`,
       url: BASE_URL,
       timeout: 60_000,
       reuseExistingServer: false,
       env: { ...serverEnv(BASE_URL), ...providers("mock", "mock", "mock") },
     },
     {
-      command: `pnpm start -p ${LOCAL_PORT}`,
+      command: `pnpm start -H 127.0.0.1 -p ${LOCAL_PORT}`,
       url: LOCAL_URL,
       timeout: 60_000,
       reuseExistingServer: false,
