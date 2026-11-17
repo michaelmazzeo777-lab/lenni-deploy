@@ -1,0 +1,48 @@
+{
+  "fps": 30,
+  "sizes": { "land": [1920, 1080], "vertical": [1080, 1920] },
+  "video": { "codec": "libx264", "preset": "medium", "crf": 18 },
+  "audio": {
+    "target_lufs": -16.0,
+    "tolerance_lu": 0.3,
+    "true_peak_ceiling_dbtp": -1.0,
+    "true_peak_goal_dbtp": -1.3,
+    "sample_rate": 48000,
+    "bitrate": "192k",
+    "bed_under_voice_lu": 20,
+    "bed_crossfade_sec": 1.5
+  },
+  "captions": {
+    "land": { "left": 0.05, "right": 0.95, "top": 0.795, "font_scale": 0.033 },
+    "vertical": { "left": 0.06, "right": 0.86, "top": 0.69, "font_scale": 0.0235 },
+    "min_cue_sec": 0.8,
+    "max_chars_per_sec": 25,
+    "vertical_safe": { "max_bottom": 0.776, "max_right": 0.86 }
+  },
+  "timing": {
+    "lead_sec": 0.25,
+    "tail_sec": 0.65,
+    "min_beat_sec": 4.0,
+    "max_beat_sec": 20.0,
+    "min_total_sec": 60,
+    "max_total_sec": 90,
+    "transition_start": 0.56,
+    "transition_len": 0.075
+  },
+  "alignment": {
+    "silence_below_speech_db": 30,
+    "min_pause_sec": 0.09,
+    "min_script_match": 0.6,
+    "sync_fail_ms": 250
+  },
+  "vertical_panel_seam": "feather",
+  "fonts": {
+    "regular": "~/pinokio/bin/miniforge/pkgs/font-ttf-ubuntu-0.83-h77eed37_3/fonts/Ubuntu-R.ttf",
+    "bold": "~/pinokio/bin/miniforge/pkgs/font-ttf-ubuntu-0.83-h77eed37_3/fonts/Ubuntu-B.ttf"
+  },
+  "tools": {
+    "python_with_pillow": "~/MESH/RUNTIME/build04-py/bin/python",
+    "whisper_cli": "/opt/homebrew/bin/whisper-cli",
+    "whisper_model": "../leonida-field-guide-recovery/.data/models/ggml-base.en.bin"
+  }
+}

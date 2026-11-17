@@ -83,7 +83,7 @@ async function loadCapture(actor: Actor, captureSessionId: string) {
 // Stale-fact gate: a real (local) Short cannot be scripted or rendered while
 // its content item relies on a claim that is stale, contradicted, retired or
 // quarantined under the canonical taxonomy. Refresh the source first.
-async function assertClaimsCurrent(contentId: string, requireOne = false) {
+export async function assertClaimsCurrent(contentId: string, requireOne = false) {
   const links = await prisma.contentClaim.findMany({
     where: { contentId },
     include: { claim: { include: { sources: { include: { source: true } } } } },
@@ -317,7 +317,7 @@ export async function synthesizeVoiceover(actor: Actor, scriptId: string, voiceP
   return result;
 }
 
-const loadVoiceover = (voiceoverId: string) =>
+export const loadVoiceover = (voiceoverId: string) =>
   prisma.shortsVoiceover.findUnique({
     where: { id: voiceoverId },
     include: {

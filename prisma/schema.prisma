@@ -1233,6 +1233,7 @@ enum RenderReviewState {
 enum MediaJobKind {
   NARRATION
   RENDER
+  PREMIUM_RENDER // both formats from the premium engine, run in the background
 }
 
 enum MediaJobStatus {
@@ -1240,6 +1241,7 @@ enum MediaJobStatus {
   RUNNING
   SUCCEEDED
   FAILED
+  CANCELED
 }
 
 // One row per distinct narration/render request (same real inputs = same key).
@@ -1256,6 +1258,11 @@ model MediaJob {
   lastError      String?
   failureJson    Json? // QA report or diagnostics of the last failed attempt
   resultId       String? // ShortsVoiceover.id or ShortsRender.id
+  // Background jobs (PREMIUM_RENDER) only:
+  progress          String? // what the job is doing now, for the operator
+  heartbeatAt       DateTime? // refreshed while the job's process is alive
+  cancelRequestedAt DateTime?
+  pid               Int? // process group of the running engine
   startedAt      DateTime?
   finishedAt     DateTime?
   createdBy      String

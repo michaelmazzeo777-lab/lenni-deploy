@@ -40,6 +40,7 @@ export async function resolveMediaTarget(
     kind === "bundle" ||
     kind === "cover" ||
     kind === "contact" ||
+    kind === "captions" ||
     kind === "qa"
   ) {
     const r = await prisma.shortsRender.findUnique({ where: { id } });
@@ -50,6 +51,12 @@ export async function resolveMediaTarget(
     if (kind === "cover") return { path: `${path.dirname(r.storagePath)}/cover.jpg` };
     if (kind === "contact") return { path: `${path.dirname(r.storagePath)}/contact.jpg` };
     if (kind === "qa") return { path: `${path.dirname(r.storagePath)}/qa.json` };
+    if (kind === "captions") {
+      return {
+        path: `${path.dirname(r.storagePath)}/captions.srt`,
+        download: `captions-${r.id}.srt`,
+      };
+    }
     return { path: r.bundlePath, download: `leonida-short-${r.id}.zip` };
   }
   return null;

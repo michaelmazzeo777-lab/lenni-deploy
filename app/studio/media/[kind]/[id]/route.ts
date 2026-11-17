@@ -19,6 +19,7 @@ const TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".zip": "application/zip",
   ".json": "application/json",
+  ".srt": "text/plain; charset=utf-8",
 };
 
 export async function GET(

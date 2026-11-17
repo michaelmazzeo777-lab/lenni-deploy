@@ -46,7 +46,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: /(local-media|explainer)\.spec/,
+      testIgnore: /(local-media|explainer|premium)\.spec/,
       use: {
         ...devices["Desktop Chrome"],
         // The environment pre-installs a Chromium build that differs from this
@@ -58,7 +58,7 @@ export default defineConfig({
     },
     {
       name: "local-media",
-      testMatch: /(local-media|explainer)\.spec/,
+      testMatch: /(local-media|explainer|premium)\.spec/,
       use: {
         ...devices["Desktop Chrome"],
         baseURL: LOCAL_URL,

@@ -22,13 +22,19 @@ const s = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 
 const PATH = "/studio/shorts";
 
-async function run(fn: () => Promise<unknown>) {
-  let to = PATH;
+// Review forms also live on the Library page; they say so with a `back` field.
+// Only known pages are accepted, so a form can never redirect elsewhere.
+const BACK = new Set([PATH, "/studio/library"]);
+
+async function run(fn: () => Promise<unknown>, back?: string) {
+  const base = back && BACK.has(back) ? back : PATH;
+  let to = base;
   try {
     await fn();
     revalidatePath(PATH);
+    revalidatePath("/studio/library");
   } catch (e) {
-    to = `${PATH}?error=${encodeURIComponent(errMsg(e))}`;
+    to = `${base}?error=${encodeURIComponent(errMsg(e))}`;
   }
   redirect(to);
 }
@@ -68,13 +74,15 @@ export async function renderShortAction(fd: FormData) {
 
 export async function reviewRenderAction(fd: FormData) {
   const actor = await requireActor();
-  await run(() =>
-    reviewRender(
-      actor,
-      s(fd, "renderId"),
-      s(fd, "decision") === "APPROVED" ? "APPROVED" : "REJECTED",
-      s(fd, "notes") || undefined,
-    ),
+  await run(
+    () =>
+      reviewRender(
+        actor,
+        s(fd, "renderId"),
+        s(fd, "decision") === "APPROVED" ? "APPROVED" : "REJECTED",
+        s(fd, "notes") || undefined,
+      ),
+    s(fd, "back"),
   );
 }
 
@@ -82,7 +90,10 @@ export async function reviewRenderAction(fd: FormData) {
 // the approver typed, never a value filled in by the page.
 export async function approveRenderVersionAction(fd: FormData) {
   const actor = await requireActor();
-  await run(() => approveRenderVersion(actor, s(fd, "renderId"), s(fd, "checksumPrefix")));
+  await run(
+    () => approveRenderVersion(actor, s(fd, "renderId"), s(fd, "checksumPrefix")),
+    s(fd, "back"),
+  );
 }
 
 export async function publishShortAction(fd: FormData) {

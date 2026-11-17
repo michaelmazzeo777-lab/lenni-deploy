@@ -11,6 +11,10 @@ import {
   approveRenderVersionAction,
   publishShortAction,
 } from "@/app/studio/shorts-actions";
+import { cancelPremiumRenderAction, startPremiumRenderAction } from "@/app/studio/premium-actions";
+import { AutoRefresh } from "@/app/studio/_auto-refresh";
+import { recoverInterruptedJobs } from "@/domain/premiumRender";
+import { engineProblems } from "@/lib/premium/engine";
 
 interface QaView {
   verified?: boolean;
@@ -39,8 +43,10 @@ export default async function ShortsPage({
 }) {
   const actor = await requireStudioActor();
   const { error } = await searchParams;
+  // A premium job whose process died with the Studio is closed here so it can be retried.
+  await recoverInterruptedJobs(actor.workspaceId);
 
-  const [captures, scripts, failedJobs] = await Promise.all([
+  const [captures, scripts, failedJobs, premiumJobs] = await Promise.all([
     prisma.captureSession.findMany({
       where: {
         content: { workspaceId: actor.workspaceId },
@@ -72,7 +78,14 @@ export default async function ShortsPage({
       orderBy: { updatedAt: "desc" },
       take: 200,
     }),
+    prisma.mediaJob.findMany({
+      where: { workspaceId: actor.workspaceId, kind: "PREMIUM_RENDER" },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+    }),
   ]);
+  const premiumJob = (voiceoverId: string) => premiumJobs.find((j) => j.subjectId === voiceoverId);
+  const premiumNotReady = engineProblems();
   // The latest failure per narration (script) or render (voiceover + format).
   const failed = (subjectId: string, label: string) =>
     failedJobs.find((j) => j.subjectId === subjectId && j.label === label);
@@ -112,6 +125,7 @@ export default async function ShortsPage({
         Safety-flagged scripts are quarantined for human review, never auto-passed.
       </p>
       <Banner error={error} />
+      <AutoRefresh active={premiumJobs.some((j) => j.status === "RUNNING")} />
 
       <div className="card">
         <h2>Eligible captures ({captures.length})</h2>
@@ -320,6 +334,81 @@ export default async function ShortsPage({
                 ))
             : null}
 
+          {script.voiceover && script.captureSession.kind === "GRAPHICS"
+            ? (() => {
+                const job = premiumJob(script.voiceover.id);
+                const has = script.renders.some(
+                  (r) =>
+                    r.status !== "REJECTED" &&
+                    (r.manifestJson as { renderer?: string } | null)?.renderer === "premium-engine",
+                );
+                const running = job?.status === "RUNNING";
+                return (
+                  <div
+                    data-testid="premium-panel"
+                    style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 10 }}
+                  >
+                    <strong>Premium render</strong>{" "}
+                    <span className="muted" style={{ fontSize: "0.82rem" }}>
+                      16:9 and native 9:16 together, with moving artwork, timed captions and
+                      levelled sound. Takes a few minutes; you can leave this page.
+                    </span>
+                    {job ? (
+                      <p style={{ margin: "6px 0" }}>
+                        <span
+                          className={`badge ${
+                            job.status === "SUCCEEDED"
+                              ? "CONFIRMED"
+                              : job.status === "FAILED"
+                                ? "LEAKED"
+                                : "UNVERIFIED"
+                          }`}
+                        >
+                          {job.status}
+                        </span>{" "}
+                        <span style={{ fontSize: "0.85rem" }}>
+                          {running
+                            ? (job.progress ?? "Working")
+                            : job.status === "SUCCEEDED"
+                              ? "Finished. Both files are listed below and in the Library."
+                              : (job.lastError ?? "")}
+                        </span>{" "}
+                        <span className="muted" style={{ fontSize: "0.78rem" }}>
+                          attempt {job.attempts}
+                          {job.startedAt
+                            ? ` · started ${job.startedAt.toISOString().slice(11, 19)} UTC`
+                            : ""}
+                        </span>
+                      </p>
+                    ) : null}
+                    {premiumNotReady.length > 0 ? (
+                      <p className="error" style={{ fontSize: "0.82rem" }}>
+                        Premium engine not ready: {premiumNotReady.join("; ")}
+                      </p>
+                    ) : null}
+                    {mayGenerate && running ? (
+                      <form action={cancelPremiumRenderAction} style={{ display: "inline" }}>
+                        <input type="hidden" name="jobId" value={job!.id} />
+                        <button type="submit" className="secondary">
+                          Cancel premium render
+                        </button>
+                      </form>
+                    ) : null}
+                    {mayGenerate && !running && !has && premiumNotReady.length === 0 ? (
+                      <form action={startPremiumRenderAction} style={{ display: "inline" }}>
+                        <input type="hidden" name="voiceoverId" value={script.voiceover.id} />
+                        <button type="submit">
+                          {job && job.status !== "SUCCEEDED"
+                            ? "Retry premium render"
+                            : "Start premium render"}
+                        </button>
+                      </form>
+                    ) : null}
+                  </div>
+                );
+              })()
+            : null}
+
           {script.renders.map((r) => (
             <div
               key={r.id}
@@ -330,7 +419,11 @@ export default async function ShortsPage({
               }}
             >
               <p style={{ margin: 0 }}>
-                Render {r.resolution} @{r.frameRate}fps ·{" "}
+                Render {r.resolution} @{r.frameRate}fps
+                {(r.manifestJson as { renderer?: string } | null)?.renderer === "premium-engine"
+                  ? " · PREMIUM"
+                  : ""}{" "}
+                ·{" "}
                 <span
                   className={`badge ${
                     r.status === "CLEAN"

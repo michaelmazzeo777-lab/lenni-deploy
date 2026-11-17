@@ -31,6 +31,7 @@ export default async function StudioLayout({ children }: { children: React.React
         <Link href="/studio/contributors">Contributors</Link>
         <Link href="/studio/captures">Capture intake</Link>
         <Link href="/studio/shorts">Shorts pipeline</Link>
+        <Link href="/studio/library">Library &amp; review</Link>
 
         <h2>Research</h2>
         <Link href="/studio/sources">Sources</Link>

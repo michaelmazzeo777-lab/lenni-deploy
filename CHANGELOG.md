@@ -65,6 +65,15 @@ Full completion record: `docs/LOCAL_STUDIO_COMPLETION.md`.
 - No code changed. The verified `LOCAL_STUDIO_COMPLETE` baseline remains commit `2f43873`
   (tag `local-studio-complete-2026-11-15`).
 
+## 2026-11-17 — Final candidate: premium renderer inside the Studio
+
+- **Premium render from the Studio screens.** A narrated explainer can be rendered in 16:9 and native 9:16 by the premium engine (vendored in `premium-engine/`). The Studio writes the episode file from the script and title cards; the operator never edits JSON or runs Python.
+- **Background job with real states.** `PREMIUM_RENDER` jobs run after the request returns: live progress, cancel (the engine's whole process group is killed), timeout, retry, and recovery of a job whose process died with the Studio. New `CANCELED` state. Migration `20261117011500_premium_render_jobs` (additive).
+- **Safe execution.** No shell; episode text travels in a file, never on the command line; each job has its own work folder, removed afterwards; outputs are probed and must pass the engine's QA before anything is stored.
+- **Library & review page.** Every render, playable, with evidence, asset rights, QA and state; Owner approval by file hash; revision request. Caption file download. Publication stays blocked.
+- **Launcher.** `sh scripts/start-candidate.sh` (port 3300, own PostgreSQL on 5433).
+- Tests: `tests/unit/premium-episode.test.ts`, `tests/integration/premium-render.test.ts` (real engine), `tests/e2e/premium.spec.ts`.
+
 ## 2026-11-16 — Completion build (branch `build/completion-20261115`)
 
 Not promoted: the Studio of record stays at `dd82a4a`. Full record: `docs/COMPLETION_BUILD.md`.
