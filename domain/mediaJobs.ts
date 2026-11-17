@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { DomainError, isDomainError, precondition } from "@/lib/errors";
 import type { Actor } from "@/lib/auth/context";
+import { claimHeavySlotWaiting, staleBefore, startHeartbeat } from "@/lib/jobs/heavy";
 import type { MediaJob, MediaJobKind } from "@prisma/client";
 
 // Narration and render requests run inside the request that asked for them
@@ -21,6 +22,12 @@ import type { MediaJob, MediaJobKind } from "@prisma/client";
 export const MAX_AUTO_ATTEMPTS = 2;
 /** A RUNNING job older than this was abandoned (crash, restart) and may be taken over. */
 export const STALE_RUNNING_MS = 15 * 60 * 1000;
+/**
+ * How long an in-request job waits for another heavy job (a premium render,
+ * say) to free the machine before giving up. Waiting, not refusing: refusing
+ * would make every narration fail while a background render runs.
+ */
+export const HEAVY_WAIT_MS = Number(process.env.JOB_HEAVY_WAIT_MS ?? 10 * 60 * 1000);
 
 /** A media tool failed (ffmpeg, say, zip). Worth one automatic retry. */
 export class MediaProcessError extends Error {}
@@ -87,25 +94,41 @@ export async function runMediaJob<T extends { id: string }>(
     if (existing) return { result: existing, reused: true, job };
   }
 
-  // Atomic claim: only one request can move the row to RUNNING.
+  // Atomic claim: only one request can move the row to RUNNING, and only while
+  // no other heavy job holds the machine (waits up to HEAVY_WAIT_MS for it).
+  // A RUNNING row may be taken over only once its heartbeat has stopped.
   const now = new Date();
-  const claimed = await prisma.mediaJob.updateMany({
-    where: {
-      id: job.id,
+  const claim = await claimHeavySlotWaiting(
+    job.id,
+    {
       OR: [
         { status: { in: ["QUEUED", "FAILED", "SUCCEEDED"] } },
-        { status: "RUNNING", startedAt: { lt: new Date(now.getTime() - STALE_RUNNING_MS) } },
+        { status: "RUNNING", heartbeatAt: { lt: staleBefore() } },
+        {
+          status: "RUNNING",
+          heartbeatAt: null,
+          startedAt: { lt: new Date(now.getTime() - STALE_RUNNING_MS) },
+        },
       ],
     },
-    data: { status: "RUNNING", startedAt: now, finishedAt: null },
-  });
-  if (claimed.count === 0) {
+    { startedAt: now, finishedAt: null },
+    { maxWaitMs: HEAVY_WAIT_MS },
+  );
+  if (!claim.ok && claim.reason === "busy") {
+    throw precondition(
+      `${spec.label} is waiting for another media job ("${claim.holder}") to finish; try again shortly`,
+    );
+  }
+  if (!claim.ok) {
     throw precondition(`${spec.label} is already running; wait for it to finish`);
   }
+  // Fencing token: the attempt number this request owns. A later takeover
+  // bumps it, after which this request can no longer write the row.
+  let owned = claim.attempt;
 
   const fail = async (message: string, failure: unknown) => {
-    job = await prisma.mediaJob.update({
-      where: { id: job.id },
+    await prisma.mediaJob.updateMany({
+      where: { id: job.id, status: "RUNNING", attempts: owned },
       data: {
         status: "FAILED",
         lastError: message.slice(0, 2000),
@@ -113,6 +136,7 @@ export async function runMediaJob<T extends { id: string }>(
         finishedAt: new Date(),
       },
     });
+    job = await prisma.mediaJob.findUniqueOrThrow({ where: { id: job.id } });
     await writeAudit({
       workspaceId: actor.workspaceId,
       actorId: actor.userId,
@@ -125,11 +149,17 @@ export async function runMediaJob<T extends { id: string }>(
 
   let lastMessage = "unknown error";
   for (let attempt = 1; attempt <= MAX_AUTO_ATTEMPTS; attempt++) {
-    await prisma.mediaJob.update({ where: { id: job.id }, data: { attempts: { increment: 1 } } });
+    const bumped = await prisma.mediaJob.updateMany({
+      where: { id: job.id, status: "RUNNING", attempts: owned },
+      data: { attempts: { increment: 1 } },
+    });
+    if (bumped.count === 0) throw precondition(`${spec.label} was taken over by another request`);
+    owned += 1;
+    const stopHeartbeat = startHeartbeat(job.id, owned);
     try {
       const result = await spec.work(attempt);
-      job = await prisma.mediaJob.update({
-        where: { id: job.id },
+      const done = await prisma.mediaJob.updateMany({
+        where: { id: job.id, status: "RUNNING", attempts: owned },
         data: {
           status: "SUCCEEDED",
           resultId: result.id,
@@ -138,6 +168,8 @@ export async function runMediaJob<T extends { id: string }>(
           finishedAt: new Date(),
         },
       });
+      if (done.count === 0) throw precondition(`${spec.label} was taken over by another request`);
+      job = await prisma.mediaJob.findUniqueOrThrow({ where: { id: job.id } });
       return { result, reused: false, job };
     } catch (e) {
       lastMessage = e instanceof Error ? e.message : "unknown error";
@@ -146,6 +178,8 @@ export async function runMediaJob<T extends { id: string }>(
         throw e;
       }
       if (!(e instanceof MediaProcessError) || attempt === MAX_AUTO_ATTEMPTS) break;
+    } finally {
+      stopHeartbeat();
     }
   }
   job = await prisma.mediaJob.findUniqueOrThrow({ where: { id: job.id } });

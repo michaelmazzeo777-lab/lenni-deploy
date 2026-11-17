@@ -14,18 +14,35 @@ function bin(name: "ffmpeg" | "ffprobe"): string {
   return existsSync(full) ? full : name;
 }
 
+/**
+ * Upper bound on any single media tool call (ffmpeg, ffprobe, whisper, say,
+ * zip). Generous on purpose: it exists to kill a wedged process, not to police
+ * how long honest work takes on a slow machine.
+ */
+export const MEDIA_TOOL_TIMEOUT_MS = Number(process.env.MEDIA_TOOL_TIMEOUT_MS ?? 15 * 60 * 1000);
+
 export function run(
   cmd: string,
   args: string[],
-  opts: { cwd?: string } = {},
+  opts: { cwd?: string; timeoutMs?: number } = {},
 ): Promise<{ stdout: string; stderr: string }> {
+  const timeout = opts.timeoutMs ?? MEDIA_TOOL_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { maxBuffer: 256 * 1024 * 1024, cwd: opts.cwd }, (err, stdout, stderr) => {
-      if (err) {
-        const tail = String(stderr).trim().split("\n").slice(-4).join(" | ");
-        reject(new Error(`${cmd} failed: ${tail || err.message}`));
-      } else resolve({ stdout: String(stdout), stderr: String(stderr) });
-    });
+    execFile(
+      cmd,
+      args,
+      { maxBuffer: 256 * 1024 * 1024, cwd: opts.cwd, timeout, killSignal: "SIGKILL" },
+      (err, stdout, stderr) => {
+        if (err && (err as { killed?: boolean }).killed) {
+          reject(
+            new Error(`${cmd} timed out after ${Math.round(timeout / 1000)}s and was stopped`),
+          );
+        } else if (err) {
+          const tail = String(stderr).trim().split("\n").slice(-4).join(" | ");
+          reject(new Error(`${cmd} failed: ${tail || err.message}`));
+        } else resolve({ stdout: String(stdout), stderr: String(stderr) });
+      },
+    );
   });
 }
 

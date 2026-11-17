@@ -26,11 +26,12 @@ import {
   runEngine,
   workRoot,
 } from "@/lib/premium/engine";
+import { claimHeavySlot, HEAVY_STALE_MS, staleBefore, startHeartbeat } from "@/lib/jobs/heavy";
 import { QuarantineStatus, type MediaJob } from "@prisma/client";
 
 export const PREMIUM_LABEL = "Premium render (16:9 + 9:16)";
 /** A running job whose process has not reported for this long has lost its process. */
-export const HEARTBEAT_STALE_MS = 45_000;
+export const HEARTBEAT_STALE_MS = HEAVY_STALE_MS;
 
 const sha256 = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 type Loaded = NonNullable<Awaited<ReturnType<typeof loadVoiceover>>>;
@@ -126,22 +127,27 @@ export async function startPremiumRender(actor: Actor, voiceoverId: string): Pro
   if (job.status === "SUCCEEDED" && (await liveRenders(voiceoverId, idempotencyKey)).length === 2)
     return job;
 
-  // Atomic claim: only one request can move the row to RUNNING.
-  const claimed = await prisma.mediaJob.updateMany({
-    where: { id: job.id, status: { in: ["QUEUED", "FAILED", "CANCELED", "SUCCEEDED"] } },
-    data: {
-      status: "RUNNING",
+  // Atomic claim: only one request can move the row to RUNNING, and only
+  // while no other heavy media job holds the machine. A background start
+  // refuses rather than waits: the operator can start it again afterwards.
+  const claim = await claimHeavySlot(
+    job.id,
+    { status: { in: ["QUEUED", "FAILED", "CANCELED", "SUCCEEDED"] } },
+    {
       startedAt: new Date(),
       finishedAt: null,
-      heartbeatAt: new Date(),
       cancelRequestedAt: null,
       pid: null,
       progress: "Starting",
       lastError: null,
       attempts: { increment: 1 },
     },
-  });
-  if (claimed.count === 0)
+  );
+  if (!claim.ok && claim.reason === "busy")
+    throw precondition(
+      `Another media job is running ("${claim.holder}"); start the premium render when it finishes`,
+    );
+  if (!claim.ok)
     throw precondition(
       "This premium render is already running; cancel it or wait for it to finish",
     );
@@ -151,10 +157,10 @@ export async function startPremiumRender(actor: Actor, voiceoverId: string): Pro
     action: "premium.job_started",
     entityType: "MediaJob",
     entityId: job.id,
-    metadata: { voiceoverId, attempt: job.attempts + 1 },
+    metadata: { voiceoverId, attempt: claim.attempt },
   });
   // Deliberately not awaited: the job outlives the request. Its state is in the database.
-  void execute(job.id, actor).catch(() => undefined);
+  void execute(job.id, actor, claim.attempt).catch(() => undefined);
   return prisma.mediaJob.findUniqueOrThrow({ where: { id: job.id } });
 }
 
@@ -192,10 +198,7 @@ export async function recoverInterruptedJobs(workspaceId: string): Promise<numbe
       workspaceId,
       kind: "PREMIUM_RENDER",
       status: "RUNNING",
-      OR: [
-        { heartbeatAt: null },
-        { heartbeatAt: { lt: new Date(Date.now() - HEARTBEAT_STALE_MS) } },
-      ],
+      OR: [{ heartbeatAt: null }, { heartbeatAt: { lt: staleBefore() } }],
     },
   });
   for (const job of stale) {
@@ -204,8 +207,15 @@ export async function recoverInterruptedJobs(workspaceId: string): Promise<numbe
     const message = canceled
       ? "Canceled by the operator"
       : "Interrupted: the Studio stopped while this job was running. Retry to run it again.";
+    // Closes only the attempt that was found stale, and only if it is still
+    // stale now - a runner that beat in the meantime keeps its job.
     const closed = await prisma.mediaJob.updateMany({
-      where: { id: job.id, status: "RUNNING" },
+      where: {
+        id: job.id,
+        status: "RUNNING",
+        attempts: job.attempts,
+        OR: [{ heartbeatAt: null }, { heartbeatAt: { lt: staleBefore() } }],
+      },
       data: {
         status: canceled ? "CANCELED" : "FAILED",
         lastError: message,
@@ -239,8 +249,11 @@ function killIfOurs(pid: number, jobId: string) {
   }
 }
 
-async function execute(jobId: string, actor: Actor) {
+async function execute(jobId: string, actor: Actor, attempt: number) {
   const storage = getAssetStorage();
+  // This runner owns attempt `attempt` only; every write below is fenced by it.
+  const mine = { id: jobId, status: "RUNNING" as const, attempts: attempt };
+  const stopHeartbeat = startHeartbeat(jobId, attempt);
   let lastWrite = 0;
   let lastText = "";
   const beat = (text: string, force = false) => {
@@ -251,14 +264,14 @@ async function execute(jobId: string, actor: Actor) {
     lastText = text;
     void prisma.mediaJob
       .updateMany({
-        where: { id: jobId, status: "RUNNING" },
+        where: mine,
         data: { progress: text.slice(0, 200), heartbeatAt: new Date() },
       })
       .catch(() => undefined);
   };
   const finish = async (status: "FAILED" | "CANCELED", message: string, failure: unknown) => {
     await prisma.mediaJob.updateMany({
-      where: { id: jobId, status: "RUNNING" },
+      where: mine,
       data: {
         status,
         lastError: message.slice(0, 2000),
@@ -505,7 +518,7 @@ async function execute(jobId: string, actor: Actor) {
       });
     }
     await prisma.mediaJob.updateMany({
-      where: { id: jobId, status: "RUNNING" },
+      where: mine,
       data: {
         status: "SUCCEEDED",
         resultId: made[0],
@@ -525,5 +538,7 @@ async function execute(jobId: string, actor: Actor) {
     } else {
       await finish("FAILED", e instanceof Error ? e.message : "Unexpected error", null);
     }
+  } finally {
+    stopHeartbeat();
   }
 }
