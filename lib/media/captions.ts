@@ -198,6 +198,22 @@ export function captionLineCount(text: string, format: RenderFormat): number {
   return cur > 0 ? lines + 1 : lines;
 }
 
+/**
+ * Whether `text` fits one on-screen caption for `format`. The wrapped line
+ * count is the authority, because that is what QA measures
+ * (lib/media/qa.ts captionFitProblems, lib/clipper/qa.ts "Captions fit the
+ * safe area"); the character ceiling is only a cheap pre-filter. A character
+ * budget alone is not enough: at 9:16 three lines of 21 characters allow 59
+ * characters, but word boundaries can still push 59 characters onto 4 lines,
+ * which left the safe area and cost the whole vertical render.
+ */
+export function captionFits(text: string, format: RenderFormat): boolean {
+  return (
+    text.length <= captionMaxChars(format) &&
+    captionLineCount(text, format) <= CAPTION_STYLE[format].maxLines
+  );
+}
+
 /** Centre strip of the caption block: captions are centred, the attribution line is not. */
 export function captionBand(format: RenderFormat): { x: number; y: number; w: number; h: number } {
   const s = CAPTION_STYLE[format];
@@ -218,15 +234,14 @@ export interface Cue {
  * first piece keeps the line's start, so line-level sync is unchanged.
  */
 export function chunkCues(cues: Cue[], format: RenderFormat): Cue[] {
-  const max = captionMaxChars(format);
   const out: Cue[] = [];
   for (const cue of cues) {
     const text = cue.text.trim().replace(/\s+/g, " ");
-    if (text.length <= max) {
+    if (captionFits(text, format)) {
       out.push({ ...cue, text });
       continue;
     }
-    const pieces = splitBalanced(text.split(" "), max);
+    const pieces = splitBalanced(text.split(" "), format);
     const total = pieces.reduce((a, p) => a + p.length, 0);
     let t = cue.startSec;
     for (const [i, piece] of pieces.entries()) {
@@ -242,13 +257,18 @@ export function chunkCues(cues: Cue[], format: RenderFormat): Cue[] {
 }
 
 /**
- * Splits words into the fewest pieces that each fit `max` characters, aiming
- * for pieces of similar length and preferring to break after punctuation, so
- * a caption never ends with one stranded word.
+ * Splits words into the fewest pieces that each fit one caption in `format`,
+ * aiming for pieces of similar length and preferring to break after
+ * punctuation, so a caption never ends with one stranded word. A piece must
+ * satisfy captionFits, not just a character budget, so the result is already
+ * within the format's line limit when QA measures it. A single word too long
+ * for one line is still emitted whole: QA then rejects that render, which is
+ * the intended outcome rather than a caption that leaves the safe area.
  */
-function splitBalanced(words: string[], max: number): string[] {
+function splitBalanced(words: string[], format: RenderFormat): string[] {
   const text = words.join(" ");
-  if (text.length <= max || words.length < 2) return [text];
+  if (captionFits(text, format) || words.length < 2) return [text];
+  const max = captionMaxChars(format);
   const target = text.length / Math.ceil(text.length / max);
   let best = 1;
   let bestCost = Infinity;
@@ -256,11 +276,14 @@ function splitBalanced(words: string[], max: number): string[] {
   for (let i = 1; i < words.length; i++) {
     len += words[i - 1]!.length + (i > 1 ? 1 : 0);
     if (len > max) break;
+    // Adding a word never reduces the wrapped line count, so once a prefix
+    // stops fitting, no longer prefix can.
+    if (!captionFits(words.slice(0, i).join(" "), format)) break;
     const cost = Math.abs(len - target) - (/[,.;:!?]$/.test(words[i - 1]!) ? target * 0.35 : 0);
     if (cost < bestCost) {
       bestCost = cost;
       best = i;
     }
   }
-  return [words.slice(0, best).join(" "), ...splitBalanced(words.slice(best), max)];
+  return [words.slice(0, best).join(" "), ...splitBalanced(words.slice(best), format)];
 }

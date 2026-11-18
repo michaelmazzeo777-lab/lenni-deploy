@@ -44,6 +44,38 @@ describe("on-screen caption layout", () => {
     );
   });
 
+  it("splits a 9:16 caption that fits the character budget but wraps past three lines", () => {
+    // 9:16 allows 21 characters per line, so four 11-character words wrap onto
+    // four lines while staying inside the 59-character budget. That is the case
+    // that failed the safe-area check and cost moment 1's vertical render on
+    // 2026-11-17: the budget was respected, the line limit was not.
+    const text = "aaaaaaaaaaa bbbbbbbbbbb ccccccccccc ddddddddddd";
+    expect(text.length).toBeLessThanOrEqual(captionMaxChars("9:16"));
+    expect(captionLineCount(text, "9:16")).toBe(4);
+    const out = chunkCues([{ startSec: 0, endSec: 8, text }], "9:16");
+    expect(out.length).toBeGreaterThan(1);
+    expect(
+      out.every((c) => captionLineCount(c.text, "9:16") <= CAPTION_STYLE["9:16"].maxLines),
+    ).toBe(true);
+    expect(captionFitProblems(out, "9:16")).toEqual([]);
+    // Same words, same order, same span.
+    expect(out.map((c) => c.text).join(" ")).toBe(text);
+    expect(out[0]!.startSec).toBe(0);
+    expect(out[out.length - 1]!.endSec).toBe(8);
+    // Long-form is unchanged: a wider line and a two-line budget still hold it
+    // in one caption.
+    expect(chunkCues([{ startSec: 0, endSec: 8, text }], "16:9")).toEqual([
+      { startSec: 0, endSec: 8, text },
+    ]);
+  });
+
+  it("emits a word too long to wrap whole, so QA rejects that render instead", () => {
+    const word = "a".repeat(80);
+    const out = chunkCues([{ startSec: 0, endSec: 3, text: word }], "9:16");
+    expect(out.map((c) => c.text)).toEqual([word]);
+    expect(captionFitProblems(out, "9:16").length).toBeGreaterThan(0);
+  });
+
   it("prefers to break after punctuation", () => {
     const out = chunkCues(
       [
